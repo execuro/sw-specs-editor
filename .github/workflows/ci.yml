@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  test:
+    name: Tests on Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 20 is the floor `engines.node` declares; the others are what people
+        # actually run. A zero-dependency package has no excuse for drifting
+        # off any of them.
+        node: [20, 22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: node --test test/*.test.mjs
+
+  package:
+    name: The folder is publishable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # Publishing happens on a tag, in release.yml. CI's job is to prove the
+      # tarball would be correct before anyone tags.
+      - name: Pack matches the files allow-list
+        run: node scripts/check-pack.mjs
+      - name: The shipped skill pins this exact version
+        run: node scripts/check-version.mjs
+      - name: No runtime dependencies, no install hooks
+        run: |
+          node -e '
+            const p = JSON.parse(require("fs").readFileSync("package.json", "utf8"));
+            const deps = Object.keys(p.dependencies || {});
+            if (deps.length) throw new Error("runtime dependencies are not allowed: " + deps.join(", "));
+            for (const h of ["preinstall", "install", "postinstall", "prepare"]) {
+              if (p.scripts?.[h]) throw new Error("install-time script is not allowed: " + h);
+            }
+          '

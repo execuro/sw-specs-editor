@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Specs Editor</title>
+<link rel="stylesheet" href="/page/app.css">
+</head>
+<body>
+<header id="header">
+  <div class="header-left">
+    <div class="brand"><span class="logo">S</span>Specs Editor</div>
+    <div class="tabs" id="tabs"></div>
+  </div>
+  <div class="header-right">
+    <label class="switch" title="Annotate mode: click any block to attach a note for the agent (shortcut: A, Esc to leave)">
+      <input type="checkbox" id="annotate-toggle">
+      <span class="track"><span class="knob"></span></span>
+      <span class="switch-label">Annotate</span>
+    </label>
+    <span id="queued-badge" class="badge muted" hidden></span>
+    <span id="status-dot" class="dot" title="session status"></span>
+    <span id="status-text" class="muted">connecting…</span>
+    <button id="stop-btn" class="btn subtle" title="End the editor session">Stop session</button>
+  </div>
+</header>
+<div id="banners"></div>
+<main id="layout">
+  <section id="doc" class="doc"></section>
+  <aside id="panel">
+    <div class="panel-block" id="notes-panel">
+      <div class="panel-head">
+        <h2>Notes <span id="notes-count" class="count"></span></h2>
+        <div class="panel-actions">
+          <button id="free-note-btn" class="btn subtle" title="Add a free note not bound to a block">+ free note</button>
+        </div>
+      </div>
+      <div id="notes" class="notes"></div>
+      <div class="panel-foot">
+        <button id="send-btn" class="btn primary" disabled>Send to agent</button>
+      </div>
+    </div>
+    <div class="panel-block" id="chat-panel">
+      <div class="panel-head"><h2>Agent</h2><span id="agent-state" class="muted"></span></div>
+      <div id="chat" class="chat"></div>
+      <div class="chat-input">
+        <textarea id="chat-text" rows="2" placeholder="Ask or instruct the agent… (Enter to send, Shift+Enter for a new line)"></textarea>
+        <button id="chat-send" class="btn">Send</button>
+      </div>
+    </div>
+  </aside>
+</main>
+<div id="note-popover" class="popover" role="dialog" aria-label="Note for the agent" hidden>
+  <div class="arrow"></div>
+  <div class="ne-ctx"></div>
+  <div class="ne-sel" hidden></div>
+  <textarea rows="3" placeholder="Comment for the agent — what should change here?"></textarea>
+  <div class="row">
+    <button class="btn primary save">Add note</button>
+    <button class="btn subtle cancel">Cancel</button>
+    <span class="spacer"></span>
+    <button class="btn subtle delete" hidden>Delete note</button>
+    <span class="hint">⌘/Ctrl+Enter</span>
+  </div>
+</div>
+<script src="/page/vendor/marked.min.js"></script>
+<script src="/page/diagram.js"></script>
+<script src="/page/app.js"></script>
+</body>
+</html>

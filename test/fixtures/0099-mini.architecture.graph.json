@@ -1,0 +1,22 @@
+{
+  "title": "Architecture — 0099 mini",
+  "direction": "LR",
+  "groups": [
+    { "id": "shop", "label": "Shopware" },
+    { "id": "ext", "label": "External" }
+  ],
+  "nodes": [
+    { "id": "customer", "label": "Customer", "type": "actor", "group": "shop" },
+    { "id": "order", "label": "Order", "type": "entity", "group": "shop", "note": "gains delivery_date" },
+    { "id": "holiday", "label": "Holiday calendar", "type": "store", "group": "ext" },
+    { "id": "legacy", "label": "Tea & Coffee <legacy>", "type": "widget", "group": "ext" },
+    { "id": "mail", "label": "Order confirmation", "type": "event" }
+  ],
+  "edges": [
+    { "from": "customer", "to": "order", "label": "places" },
+    { "from": "order", "to": "holiday", "label": "validated against" },
+    { "from": "order", "to": "mail", "label": "triggers" },
+    { "from": "mail", "to": "customer" },
+    { "from": "order", "to": "ghost", "label": "dangling" }
+  ]
+}

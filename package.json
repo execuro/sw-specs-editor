@@ -1,0 +1,47 @@
+{
+  "name": "@execuro-sw-ecosystem/sw-specs-editor",
+  "version": "0.1.0",
+  "description": "Specs Editor - local zero-dependency editor that renders a PRD / tech spec as a live page and relays the user's notes back to a coding agent",
+  "license": "MIT",
+  "author": "Execuro UG (haftungsbeschränkt)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/execuro/sw-specs-editor.git"
+  },
+  "homepage": "https://github.com/execuro/sw-specs-editor#readme",
+  "bugs": {
+    "url": "https://github.com/execuro/sw-specs-editor/issues"
+  },
+  "keywords": [
+    "shopware",
+    "agent",
+    "cli",
+    "prd",
+    "specification",
+    "review"
+  ],
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "sw-specs-editor": "bin/cli.mjs"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "page/",
+    "skills/",
+    "README.md",
+    "LICENSE",
+    "THIRD-PARTY-NOTICES.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "start": "node bin/cli.mjs start",
+    "test": "node --test test/*.test.mjs",
+    "check": "npm test && node scripts/check-pack.mjs && node scripts/check-version.mjs"
+  }
+}

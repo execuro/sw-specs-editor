@@ -1,0 +1,97 @@
+name: Release
+
+# Publishing is automatic and tag-driven. A tag `v0.1.0` publishes 0.1.0 to npm
+# with provenance, so every tarball traces back to the commit and the workflow
+# run that produced it.
+#
+# There is no npm token anywhere in this repository. Publishing authenticates
+# through OIDC trusted publishing: GitHub mints a short-lived identity for this
+# workflow, and npm accepts it because the package's settings name this exact
+# repository and workflow file. Renaming this file, or moving the repository,
+# breaks publishing until the trusted publisher is updated to match - which is
+# the point.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # the OIDC identity npm trusts; without it, publish is not authenticated
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.14.0"
+          registry-url: "https://registry.npmjs.org"
+
+      # Trusted publishing needs npm 11.5.1+. Node 22 ships npm 10.x, which
+      # authenticates with a token or not at all, so it must be upgraded before
+      # any publish step runs - a failure here is better than a failure after.
+      - name: npm new enough for trusted publishing
+        run: |
+          npm install -g npm@^11.5.1
+          npm --version
+
+      # Everything that gates a release runs against the tag's own tree, not
+      # against whatever CI last saw on a branch.
+      - name: Tests
+        run: node --test test/*.test.mjs
+
+      - name: The tarball carries exactly the files allow-list
+        run: node scripts/check-pack.mjs
+
+      - name: The shipped skill pins this exact version
+        run: node scripts/check-version.mjs
+
+      - name: Licence metadata is complete
+        run: |
+          test -f LICENSE
+          test -f THIRD-PARTY-NOTICES.md
+          node -e '
+            const m = JSON.parse(require("fs").readFileSync("package.json", "utf8"));
+            if (m.license !== "MIT") throw new Error("license must be MIT");
+            if (!m.author) throw new Error("author is required");
+            if (m.private) throw new Error("package.json is marked private");
+            const deps = Object.keys(m.dependencies || {});
+            if (deps.length) throw new Error("runtime dependencies are not allowed: " + deps.join(", "));
+          '
+
+      - name: The tag matches the package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          pkg=$(node -p "require('./package.json').version")
+          if [ "$tag" != "$pkg" ]; then
+            echo "tag v$tag does not match package.json $pkg"; exit 1
+          fi
+
+      # Pack first, publish that exact file. `npm publish` on a directory would
+      # rebuild the tarball, so what shipped would not be what was just checked.
+      - name: Pack
+        id: pack
+        run: echo "tarball=$(npm pack --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Publish
+        run: npm publish "${{ steps.pack.outputs.tarball }}" --provenance --access public
+
+      - name: Summary
+        run: |
+          {
+            echo "### Published"
+            echo
+            echo "\`$(node -p "require('./package.json').name")@$(node -p "require('./package.json').version")\`"
+            echo
+            echo "Consumers reach it as:"
+            echo
+            echo '```'
+            echo "npx -y $(node -p "require('./package.json').name")@$(node -p "require('./package.json').version") install-skill"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
