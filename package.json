@@ -1,6 +1,6 @@
 {
   "name": "@execuro-sw-ecosystem/sw-specs-editor",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Specs Editor - local zero-dependency editor that renders a PRD / tech spec as a live page and relays the user's notes back to a coding agent",
   "license": "MIT",
   "author": "Execuro UG (haftungsbeschränkt)",

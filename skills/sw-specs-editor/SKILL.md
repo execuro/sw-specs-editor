@@ -3,11 +3,11 @@ name: sw-specs-editor
 description: Open a PRD (specs/NNNN-slug.md) or tech spec (specs/NNNN-slug-spec.md) in the Specs Editor — a local live HTML page where the user selects blocks, attaches notes, answers open questions, sees requirement status and edits Excalidraw diagrams — and run the session loop that hands every note batch to sw-design-requirements / sw-design-solution in editor mode and posts their replies back to the page. Backs the `--editor` flag of both design skills; one runtime serves both documents as tabs. Nothing runs on open: the document is reconciled only when the user sends notes. Long-running: stays until the page is closed or the user stops it.
 when_to_use: Trigger phrases — "open the specs editor", "edit PRD 0007 in the editor", "sw-design-requirements specs/0007-x.md --editor", "sw-design-solution specs/0007-x-spec.md --editor", "review the spec in the browser".
 argument-hint: [specs/NNNN-slug.md | specs/NNNN-slug-spec.md]
-allowed-tools: Read Glob Grep Skill Bash(npx -y @execuro-sw-ecosystem/sw-specs-editor@0.1.0 *) Bash(open *) Bash(xdg-open *) Bash(grep *) Bash(printf *) Bash(tail *)
+allowed-tools: Read Glob Grep Skill Bash(npx -y @execuro-sw-ecosystem/sw-specs-editor@0.1.1 *) Bash(open *) Bash(xdg-open *) Bash(grep *) Bash(printf *) Bash(tail *)
 license: MIT
 metadata:
   author: Execuro UG (haftungsbeschränkt)
-  package: "@execuro-sw-ecosystem/sw-specs-editor@0.1.0"
+  package: "@execuro-sw-ecosystem/sw-specs-editor@0.1.1"
 ---
 
 # sw-specs-editor
@@ -19,10 +19,10 @@ The user reviews a PRD or tech spec on a local page and sends you notes; you do 
 Do not follow a session procedure from this file — an installed copy goes stale against a newer CLI. Run this once, then follow what it says:
 
 ```
-npx -y @execuro-sw-ecosystem/sw-specs-editor@0.1.0 guide
+npx -y @execuro-sw-ecosystem/sw-specs-editor@0.1.1 guide
 ```
 
-It is the single source for start, open, poll, emit and close, for the poll rules, and for the batch's fields. Every command also ends with a `next_step:` line; follow it. The CLI prints its own name bare (`sw-specs-editor poll`) — run each one as `npx -y @execuro-sw-ecosystem/sw-specs-editor@0.1.0 poll`.
+It is the single source for start, open, poll, emit and close, for the poll rules, and for the batch's fields. Every command also ends with a `next_step:` line; follow it. The CLI prints its own name bare (`sw-specs-editor poll`) — run each one as `npx -y @execuro-sw-ecosystem/sw-specs-editor@0.1.1 poll`.
 
 ## Inputs
 

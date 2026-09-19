@@ -18,7 +18,7 @@ Nothing to install for the CLI - it runs through `npx`. What a host installs is
 the **skill**, which teaches an agent to drive it:
 
 ```sh
-npx -y @execuro-sw-ecosystem/sw-specs-editor@0.1.0 install-skill
+npx -y @execuro-sw-ecosystem/sw-specs-editor@0.1.1 install-skill
 ```
 
 That writes one file, `sw-specs-editor/SKILL.md`, into your agent's skills
@@ -44,7 +44,7 @@ or drive the CLI directly. `guide` is the session protocol and the single source
 of truth for it - an agent should read that, not this file:
 
 ```
-npx -y @execuro-sw-ecosystem/sw-specs-editor@0.1.0 guide
+npx -y @execuro-sw-ecosystem/sw-specs-editor@0.1.1 guide
 ```
 
 ## Commands
