@@ -28,24 +28,21 @@
 <main id="layout">
   <section id="doc" class="doc"></section>
   <aside id="panel">
-    <div class="panel-block" id="notes-panel">
-      <div class="panel-head">
-        <h2>Notes <span id="notes-count" class="count"></span></h2>
-        <div class="panel-actions">
-          <button id="free-note-btn" class="btn subtle" title="Add a free note not bound to a block">+ free note</button>
-        </div>
-      </div>
-      <div id="notes" class="notes"></div>
-      <div class="panel-foot">
-        <button id="send-btn" class="btn primary" disabled>Send to agent</button>
-      </div>
-    </div>
     <div class="panel-block" id="chat-panel">
       <div class="panel-head"><h2>Agent</h2><span id="agent-state" class="muted"></span></div>
+      <section id="queued" class="queued" hidden aria-label="Queued items">
+        <div class="q-head">
+          <button id="queued-toggle" class="q-toggle" type="button" aria-expanded="true" aria-controls="queued-list">
+            <span class="caret" aria-hidden="true"></span>Queued <span id="queued-count" class="count"></span>
+          </button>
+          <button id="queued-clear" class="btn subtle" type="button" title="Remove every queued item">Clear</button>
+        </div>
+        <div id="queued-list" class="q-list"></div>
+      </section>
       <div id="chat" class="chat"></div>
       <div class="chat-input">
-        <textarea id="chat-text" rows="2" placeholder="Ask or instruct the agent… (Enter to send, Shift+Enter for a new line)"></textarea>
-        <button id="chat-send" class="btn">Send</button>
+        <textarea id="chat-text" rows="2" placeholder="Ask or instruct the agent, or click blocks in Annotate mode to queue notes… (Enter to send, Shift+Enter for a new line)"></textarea>
+        <button id="chat-send" class="btn" disabled>Send</button>
       </div>
     </div>
   </aside>

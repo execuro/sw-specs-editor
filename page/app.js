@@ -8,7 +8,7 @@
     notes: [], chat: [], changed: { prd: new Set(), spec: new Set() }, locks: { prd: null, spec: null },
     queuedWrites: 0, agent: { present: false, everPolled: false }, run: null, queue: [], closed: false, serverGone: false,
     diagrams: new Map(), tab: Math.random().toString(36).slice(2, 10), diagramState: {},
-    annotate: false, openNotes: new Set(), ownPending: new Set(), ownFocus: null,
+    annotate: false, openNotes: new Set(), ownPending: new Set(), ownFocus: null, queuedOpen: true,
   };
   const ANNOTATE_KEY = 'specs-editor:annotate';
   const $ = (sel, el = document) => el.querySelector(sel);
@@ -96,7 +96,8 @@
     n.doc = n.doc || S.active;
     if (n.kind === 'answer') S.notes = S.notes.filter(x => !(x.kind === 'answer' && x.block === n.block && x.doc === n.doc));
     S.notes.push(n);
-    saveNotes(); renderNotes(); markNoted();
+    S.queuedOpen = true;
+    saveNotes(); renderQueued(); markNoted();
   }
   let saveTimer = null;
   function saveNotes() { clearTimeout(saveTimer); saveTimer = setTimeout(() => api('/api/notes', { notes: S.notes, tab: S.tab }).catch(() => {}), 400); }
@@ -114,44 +115,46 @@
     document.querySelectorAll('.blk.noted, tr.noted').forEach(e => e.classList.remove('noted'));
     for (const n of S.notes) if (n.doc === S.active && n.block) document.querySelectorAll(`[data-id="${CSS.escape(n.block)}"]`).forEach(e => e.classList.add('noted'));
   }
-  function renderNotes() {
-    const host = $('#notes');
+  function renderQueued() {
+    const box = $('#queued'), host = $('#queued-list'), chat = $('#chat');
+    const atBottom = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 24;
+    box.hidden = false;
+    box.classList.toggle('collapsed', !S.queuedOpen);
+    $('#queued-toggle').setAttribute('aria-expanded', String(S.queuedOpen));
+    $('#queued-count').textContent = S.notes.length ? `(${S.notes.length})` : '';
     host.innerHTML = '';
-    $('#notes-count').textContent = S.notes.length ? `(${S.notes.length})` : '';
-    if (!S.notes.length) host.append(el('div', { class: 'empty' }, 'Select any block to add a note, answer a question, or add a free note.'));
-    for (const n of S.notes) {
-      const box = el('div', { class: 'note' + (n.missing ? ' missing' : ''), dataset: { nid: n.id } });
-      const head = el('div', { class: 'n-head' }, el('span', { class: 'badge ' + n.doc }, docLabel(n.doc)), el('span', { class: 'n-kind' }, n.kind));
-      if (n.block) head.append(el('span', { class: 'n-ref', onclick: () => gotoBlock(n.block, n.doc) }, n.block));
-      if (n.option) head.append(el('span', { class: 'badge' }, 'option ' + n.option));
-      box.append(head);
-      if (n.path) box.append(el('div', { class: 'n-path', title: n.path + (n.line ? ` · lines ${n.line}–${n.endLine || n.line}` : '') }, n.path + (n.line ? ` · L${n.line}${n.endLine && n.endLine !== n.line ? '–' + n.endLine : ''}` : '')));
-      if (n.quote) box.append(el('div', { class: 'n-quote', title: n.quote }, '“' + n.quote + '”'));
-      if (n.selection) box.append(el('div', { class: 'n-sel', title: 'highlighted text the comment refers to' }, n.selection));
-      if (n.missing) box.append(el('div', { class: 'n-missing' }, 'block missing - the referenced block no longer exists'));
-      const text = el('div', { class: 'n-text' }, n.text || (n.kind === 'answer' ? '(option only)' : ''));
-      box.append(text);
-      const actions = el('div', { class: 'n-actions' });
-      actions.append(el('button', { class: 'btn', onclick: () => {
-        const ta = el('textarea', { rows: 3 }); ta.value = n.text || '';
-        text.replaceWith(ta); ta.focus();
-        const save = el('button', { class: 'btn primary', onclick: () => { n.text = ta.value.trim(); saveNotes(); renderNotes(); } }, 'Save');
-        actions.innerHTML = ''; actions.append(save, el('button', { class: 'btn', onclick: renderNotes }, 'Cancel'));
-      } }, 'Edit'));
-      actions.append(el('button', { class: 'btn', onclick: () => {
-        S.notes = S.notes.filter(x => x !== n);
-        if (n.kind === 'answer' && n.block) syncAnswer(n.doc, n.block, null);
-        saveNotes(); renderNotes(); markNoted(); renderDoc();
-      } }, 'Delete'));
-      box.append(actions);
-      host.append(box);
-    }
+    if (!S.notes.length) host.append(el('div', { class: 'q-empty' }, 'No queued messages'));
+    else for (const n of S.notes) host.append(queuedRow(n));
+    if (atBottom) chat.scrollTop = chat.scrollHeight;
     updateSendButton();
   }
+  function queuedRow(n) {
+    const title = [n.missing ? 'block missing - the referenced block no longer exists' : null, n.path ? n.path + (n.line ? ` · L${n.line}${n.endLine && n.endLine !== n.line ? '–' + n.endLine : ''}` : '') : null, n.quote ? '“' + n.quote + '”' : null, n.selection].filter(Boolean).join('\n');
+    const row = el('div', { class: 'q-row' + (n.missing ? ' missing' : ''), dataset: { nid: n.id }, title: title || null },
+      el('span', { class: 'badge ' + n.doc }, docLabel(n.doc)),
+      n.missing ? el('span', { class: 'q-kind' }, '⚠') : null,
+      n.block ? el('span', { class: 'q-ref', onclick: () => gotoBlock(n.block, n.doc) }, n.block) : el('span', { class: 'q-kind' }, n.kind),
+      n.option ? el('span', { class: 'q-kind' }, 'opt ' + n.option) : null,
+      el('div', { class: 'q-text' }, n.text || (n.kind === 'answer' ? '(option only)' : '')),
+      el('button', { class: 'q-x', type: 'button', title: 'Remove from the batch', onclick: () => removeQueued(n) }, '✕'));
+    return row;
+  }
+  function removeQueued(n) {
+    S.notes = S.notes.filter(x => x !== n);
+    if (n.kind === 'answer' && n.block) syncAnswer(n.doc, n.block, null);
+    saveNotes(); renderQueued(); markNoted(); renderDoc();
+  }
+  function clearQueued() {
+    if (!S.notes.length) return;
+    if (!confirm(`Remove all ${S.notes.length} queued item(s)? Nothing is sent to the agent.`)) return;
+    const gone = S.notes; S.notes = [];
+    for (const n of gone) if (n.kind === 'answer' && n.block) syncAnswer(n.doc, n.block, null);
+    saveNotes(); renderQueued(); markNoted(); renderDoc();
+  }
   function updateSendButton() {
-    const b = $('#send-btn');
-    b.disabled = !S.notes.length || S.closed;
-    b.textContent = S.run ? 'Send to agent (will queue)' : 'Send to agent';
+    const b = $('#chat-send'), n = S.notes.length, text = ($('#chat-text') && $('#chat-text').value || '').trim();
+    b.disabled = S.closed || (!n && !text);
+    b.textContent = (n ? `Send (${n})` : 'Send') + (S.run ? ' · queues' : '');
   }
 
   async function sendBatch(chatText) {
@@ -162,7 +165,7 @@
     }
     try {
       const r = await api('/api/batch', body);
-      S.notes = []; renderNotes(); markNoted();
+      S.notes = []; S.queuedOpen = true; saveNotes(); renderQueued(); markNoted();
       S.changed.prd.clear(); S.changed.spec.clear();
       $('#chat-text').value = ''; $('#chat-text').style.height = '';
       renderDoc();
@@ -233,7 +236,7 @@
     const p = popEl();
     const text = p.querySelector('textarea').value.trim();
     if (!text) { p.querySelector('textarea').focus(); return; }
-    if (pop.existing) { pop.existing.text = text; if (pop.selection) pop.existing.selection = pop.selection; Object.assign(pop.existing, pop.ctx); saveNotes(); renderNotes(); }
+    if (pop.existing) { pop.existing.text = text; if (pop.selection) pop.existing.selection = pop.selection; Object.assign(pop.existing, pop.ctx); saveNotes(); renderQueued(); }
     else addNote({ kind: 'comment', ...pop.ctx, ...(pop.selection ? { selection: pop.selection } : {}), text });
     closeNoteEditors();
   }
@@ -242,7 +245,7 @@
     p.querySelector('.save').addEventListener('click', savePopover);
     p.querySelector('.cancel').addEventListener('click', closeNoteEditors);
     p.querySelector('.delete').addEventListener('click', () => {
-      if (pop.existing) { S.notes = S.notes.filter(x => x !== pop.existing); saveNotes(); renderNotes(); markNoted(); }
+      if (pop.existing) { S.notes = S.notes.filter(x => x !== pop.existing); saveNotes(); renderQueued(); markNoted(); }
       closeNoteEditors();
     });
     p.querySelector('textarea').addEventListener('keydown', (e) => {
@@ -443,7 +446,7 @@
       if (answer && answer.option) {
         // Drop the chosen option: the note (if any), the tick in the file, and the local model.
         S.notes = S.notes.filter(x => x !== answer); q.answer = null; syncAnswer(doc, q.id, null);
-        saveNotes(); renderNotes(); markNoted(); renderDoc();
+        saveNotes(); renderQueued(); markNoted(); renderDoc();
       }
       const again = document.querySelector(`#doc .question[data-id="${CSS.escape(q.id)}"] .own-input`);
       (again || input).focus();
@@ -451,7 +454,7 @@
     const saveOwn = () => {
       const text = input.value.trim();
       S.ownFocus = null;
-      if (!text) { if (ownSelected) { S.ownPending.add(ownKey); S.notes = S.notes.filter(x => x !== answer); q.answer = null; syncAnswer(doc, q.id, null); saveNotes(); renderNotes(); markNoted(); renderDoc(); } return; }
+      if (!text) { if (ownSelected) { S.ownPending.add(ownKey); S.notes = S.notes.filter(x => x !== answer); q.answer = null; syncAnswer(doc, q.id, null); saveNotes(); renderQueued(); markNoted(); renderDoc(); } return; }
       if (ownSelected && text === (answer.text || '')) return;
       S.ownPending.delete(ownKey);
       addNote({ kind: 'answer', ...noteContext(q, doc), text });
@@ -662,6 +665,7 @@
       if (e.type === 'batch') host.append(batchBubble(e));
       else if (e.type === 'reply') { const lines = progress.get(e.batch || '_'); host.append(replyBubble(e, lines)); }
       else if (e.type === 'system') host.append(el('div', { class: 'msg system' }, e.text));
+      else if (e.type === 'divider') host.append(el('div', { class: 'msg divider' }, e.text));
     }
     host.scrollTop = host.scrollHeight;
   }
@@ -671,9 +675,16 @@
   }
   function batchBubble(e) {
     const m = el('div', { class: 'msg user' }, el('div', { class: 'm-head' }, 'you · ' + e.id, e.queued ? el('span', { class: 'badge' }, 'queued') : null));
-    for (const [d, v] of Object.entries(e.docs || {})) {
-      if (!v.notes?.length) continue;
-      m.append(el('div', { class: 'm-body' }, el('span', { class: 'badge ' + d }, docLabel(d)), el('ul', { class: 'note-list' }, ...v.notes.map(n => el('li', {}, n.block ? el('a', { href: '#' + n.block, dataset: { goto: n.block, doc: d } }, n.block) : null, n.block ? ' ' : '', n.kind === 'answer' && n.option ? `option ${n.option}` + (n.text ? ' - ' : '') : '', n.text || '')))));
+    const notes = Object.entries(e.docs || {}).flatMap(([d, v]) => (v.notes || []).map(n => [d, n]));
+    if (notes.length) {
+      m.append(el('details', { class: 'sent' },
+        el('summary', {}, `Sent (${notes.length})`),
+        el('ul', { class: 'note-list' }, ...notes.map(([d, n]) => el('li', {},
+          el('span', { class: 'badge ' + d }, docLabel(d)), ' ',
+          n.block ? el('a', { href: '#' + n.block, dataset: { goto: n.block, doc: d } }, n.block) : null,
+          n.block ? ' ' : '',
+          n.kind === 'answer' && n.option ? `option ${n.option}` + (n.text ? ' - ' : '') : '',
+          n.text || '')))));
     }
     if (e.chat) { const b = el('div', { class: 'm-body' }); b.innerHTML = md(e.chat); m.append(b); }
     return m;
@@ -697,7 +708,7 @@
       const d = JSON.parse(ev.data);
       S.docs[d.doc] = d.model;
       for (const id of [...(d.changed || []), ...(d.added || [])]) S.changed[d.doc].add(id);
-      rebindNotes(); renderNotes();
+      rebindNotes(); renderQueued();
       if (d.doc === S.active || !S.docs[S.active]) renderDoc();
       renderTabs();
     });
@@ -711,7 +722,7 @@
     });
     es.addEventListener('agent', (ev) => { const a = JSON.parse(ev.data); S.agent.present = a.present; S.agent.everPolled = a.everPolled || S.agent.everPolled; renderBanners(); });
     es.addEventListener('queued', (ev) => { S.queuedWrites = JSON.parse(ev.data).count; renderBanners(); });
-    es.addEventListener('notes', (ev) => { const n = JSON.parse(ev.data); if (n.tab && n.tab !== S.tab) { S.notes = n.notes || []; rebindNotes(); renderNotes(); markNoted(); } });
+    es.addEventListener('notes', (ev) => { const n = JSON.parse(ev.data); if (n.tab && n.tab !== S.tab) { S.notes = n.notes || []; rebindNotes(); renderQueued(); markNoted(); } });
     es.addEventListener('diagram', (ev) => { const d = JSON.parse(ev.data); const h = S.diagrams.get(d.doc + ':' + d.id); if (h?.handle) h.handle.reload(); });
     es.addEventListener('closing', () => { S.closed = true; es.close(); renderBanners(); document.body.append(el('div', { class: 'overlay' }, 'Session ended. You can close this tab.')); });
     es.onerror = () => { if (S.closed) return; S.serverGone = true; renderBanners(); };
@@ -726,7 +737,7 @@
     applySession(j.session); S.paths = j.paths; S.docs = j.docs; S.notes = j.notes || []; S.chat = j.chat || [];
     if (!S.docs.prd && S.docs.spec) S.active = 'spec';
     const want = new URLSearchParams(location.search).get('doc'); if (want && S.docs[want]) S.active = want;
-    rebindNotes(); renderTabs(); renderDoc(); renderNotes(); renderChat(); renderBanners();
+    rebindNotes(); renderTabs(); renderDoc(); renderQueued(); renderChat(); renderBanners();
   }
 
   function heartbeat() {
@@ -737,8 +748,9 @@
   }
 
   // ---------------------------------------------------------------- wiring
-  $('#send-btn').addEventListener('click', () => sendBatch($('#chat-text').value));
   $('#chat-send').addEventListener('click', () => sendBatch($('#chat-text').value));
+  $('#queued-toggle').addEventListener('click', () => { S.queuedOpen = !S.queuedOpen; renderQueued(); });
+  $('#queued-clear').addEventListener('click', clearQueued);
   // Enter sends; Shift/Ctrl/⌘/Alt+Enter insert a new line (IME composition Enter is left alone).
   $('#chat-text').addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' || e.isComposing) return;
@@ -754,11 +766,7 @@
     if (e.target.value.trim() || S.notes.length) sendBatch(e.target.value);
   });
   // grow the chat box with its content (up to ~8 lines)
-  $('#chat-text').addEventListener('input', (e) => { const ta = e.target; ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 8 * 20 + 14) + 'px'; });
-  $('#free-note-btn').addEventListener('click', () => {
-    const text = prompt('Free note for the agent (bound to ' + docLabel(S.active) + '):');
-    if (text && text.trim()) addNote({ kind: 'free', doc: S.active, file: S.paths?.[S.active] || null, text: text.trim() });
-  });
+  $('#chat-text').addEventListener('input', (e) => { const ta = e.target; ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 8 * 20 + 14) + 'px'; updateSendButton(); });
   $('#stop-btn').addEventListener('click', async () => {
     if (!confirm('End the editor session? The server stops; the skill in the terminal reports and exits.')) return;
     try { await api('/api/close', {}); } catch { /* already gone */ }

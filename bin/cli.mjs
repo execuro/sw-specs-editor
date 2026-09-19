@@ -27,6 +27,7 @@ const COMMANDS = {
   diagram: () => import('../lib/diagram.mjs'),
   guide: () => import('../lib/guide.mjs'),
   'install-skill': () => import('../lib/install-skill.mjs'),
+  'uninstall-skill': () => import('../lib/uninstall-skill.mjs'),
 };
 
 const USAGE = `usage: sw-specs-editor <command> [options]
@@ -40,7 +41,8 @@ const USAGE = `usage: sw-specs-editor <command> [options]
   diagram  <graph.json> <out.excalidraw> [--svg <path>|auto|none]
   migrate  --doc <path> [--root <path>]
   guide    print the session protocol
-  install-skill [--target <dir>] [--print] [--force]   install this package's skill into a host
+  install-skill   [--target <dir>] [--print] [--force]   install this package's skill into a host
+  uninstall-skill [--target <dir>]                      remove the skill this package installed
 
 The project root is taken from the document: the nearest ancestor holding .git,
 or the current directory when there is no document. --root overrides it. Session

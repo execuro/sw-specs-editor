@@ -24,7 +24,7 @@ import os from 'node:os';
 import { run } from './helpers.mjs';
 
 // The commands this package exposes. The other package's copy lists its own.
-const COMMANDS = ['start', 'status', 'stop', 'poll', 'emit', 'batch', 'diagram', 'migrate', 'guide', 'install-skill'];
+const COMMANDS = ['start', 'status', 'stop', 'poll', 'emit', 'batch', 'diagram', 'migrate', 'guide', 'install-skill', 'uninstall-skill'];
 
 // Commands that answer without a running server and without arguments.
 const SELF_CONTAINED = ['guide'];

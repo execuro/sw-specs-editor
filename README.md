@@ -26,6 +26,15 @@ directory. It is idempotent, and it refuses to overwrite a copy you have edited
 unless you pass `--force`. `--print` writes nothing and hands you the content to
 place yourself. Reload your agent session afterwards.
 
+`uninstall-skill` takes it back off again: it removes that one file, and the
+`sw-specs-editor/` directory once it is empty. A copy you have edited is kept,
+not deleted, and the command tells you where it is. Both commands take the same
+`--target <dir>`, so they always act on the same file.
+
+```sh
+npx -y @execuro-sw-ecosystem/sw-specs-editor@0.1.1 uninstall-skill
+```
+
 If you use the Shopware Ecosystem Agentic Harness, its `sw-setup` skill offers
 this for you - the Specs Editor is an optional add-on there, and declining it is
 a supported setup.
@@ -56,7 +65,8 @@ sw-specs-editor status  --doc specs/0007-x.md    # live session summary; --json 
 sw-specs-editor poll    --doc specs/0007-x.md    # waits up to 90 s -> batch | idle | closed
 sw-specs-editor stop    --doc specs/0007-x.md
 sw-specs-editor migrate --doc specs/0007-x.md    # converts a legacy question table to blocks, no server started
-sw-specs-editor install-skill [--target <dir>] [--print] [--force]
+sw-specs-editor install-skill   [--target <dir>] [--print] [--force]
+sw-specs-editor uninstall-skill [--target <dir>]  # removes only that file, keeps a copy you edited
 sw-specs-editor start --doc … --foreground --grace 60 --agent-timeout 120 --idle 14400
 ```
 
@@ -70,10 +80,10 @@ Exit codes: 0 success, 1 server unreachable, 2 usage error.
 | --- | --- |
 | Tabs | PRD and tech spec side by side. A missing spec shows **Create tech spec**, which runs `sw-design-solution` in new-spec mode |
 | Overview | Status, confidence, open questions, weakest dimension (PRD) or AC coverage and open ADRs (spec) |
-| Open questions | Pick an option (one is marked recommended, agent notes sit behind the info icon) or choose the ✎ radio and type your own answer. The pick is ticked `[x]` in the markdown at once and also becomes a note; the next run anchors it and removes the question |
+| Open questions | Pick an option (one is marked recommended, agent notes sit behind the info icon) or choose the ✎ radio and type your own answer. The pick is ticked `[x]` in the markdown at once and also becomes a queued item; the next run anchors it and removes the question |
 | Annotate | Switch in the header (shortcut `A`). Click any block, or highlight text inside it, to attach a comment |
-| Notes | The stack of unsent notes on the right. Edit or delete before sending. **Send to agent** ships them all |
-| Agent | Chat with the agent's progress and replies. Free text sent here counts as a note on the active tab |
+| Agent | Chat with the agent's progress and replies, full height on the right. Free text typed here counts as a note on the active tab |
+| Queued | Everything not yet sent — block comments, question answers, diagram requests — collects in the collapsible **Queued (n)** accordion at the top of the chat panel, under the **Agent** header. ✕ drops one item, **Clear** drops them all, **Send (n)** ships them together with whatever is in the box. A sent batch stays in the chat as a collapsed **Sent (n)** entry above the reply |
 | Diagrams | Excalidraw canvas per linked diagram. Edits save to the `.excalidraw` file; **Ask agent to regenerate** rebuilds it from the graph file |
 | Status labels | `open` / `partly` / `done` on FRs and ACs are read-only here; the implementing and verifying skills set them |
 

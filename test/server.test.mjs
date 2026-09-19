@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { canBind, hostRepo, j, sseReader, cleanup, startFixtureServer, sleep, run } from './helpers.mjs';
+import { collapseSessions } from '../lib/server.mjs';
 
 const SESSION = 'specs/.editor/0099-mini';
 const bindable = await canBind();
@@ -272,4 +273,20 @@ test('a watch that keeps failing gives up rather than retrying forever', { skip 
   assert.equal(chat.filter(e => /file watching stopped/.test(e.text || '')).length, 1, 'the warning is posted once, not per attempt');
   assert.ok(chat.some(e => /file watching gave up after 2 attempts/.test(e.text || '')), 'and the give-up is reported');
   assert.equal((await j(url + 'api/session')).status, 200, 'the server is still serving');
+});
+
+test('only the newest session banner survives; older boundaries collapse to one divider', () => {
+  const log = [
+    { type: 'system', text: 'session started on http://127.0.0.1:1/' },
+    { type: 'reply', md: 'one' },
+    { type: 'system', text: 'session closed (closed by request)' },
+    { type: 'system', text: 'session resumed on http://127.0.0.1:2/' },
+    { type: 'reply', md: 'two' },
+    { type: 'system', text: 'session closed (closed by request)' },
+    { type: 'system', text: 'session resumed on http://127.0.0.1:3/' },
+  ];
+  const out = collapseSessions(log);
+  assert.deepEqual(out.map(e => e.text ?? e.md), ['one', 'previous session', 'two', 'session resumed on http://127.0.0.1:3/']);
+  assert.deepEqual(collapseSessions(log.slice(-1)), log.slice(-1));
+  assert.equal(collapseSessions([{ type: 'system', text: 'file watching resumed' }])[0].text, 'file watching resumed');
 });

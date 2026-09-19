@@ -411,6 +411,7 @@ test('every command works through the installed .bin symlink', async t => {
       { args: ['diagram'], code: 2, expect: /usage: sw-specs-editor diagram/ },
       { args: ['migrate', '--doc', 'specs/0099-mini-spec.md'], code: 0, expect: /^spec: converted 2 question\(s\)$/m },
       { args: ['install-skill', '--print'], code: 0, expect: /name: sw-specs-editor/ },
+      { args: ['uninstall-skill'], code: 0, expect: /^next_step: nothing to remove/m },
       { args: ['bogus'], code: 2, expect: /unknown command bogus/ },
     ];
     for (const c of cases) {
