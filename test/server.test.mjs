@@ -242,3 +242,34 @@ test('malformed requests are refused rather than half-applied', { skip }, async 
   assert.equal((await fetch(url + 'api/nonesuch')).status, 404);
   assert.equal((await fetch(url + 'api/batch')).status, 404, 'the batch endpoint is POST only');
 });
+
+test('a watch error degrades live reload instead of killing the process', { skip }, async t => {
+  // fs.watch reports EMFILE and friends asynchronously on the FSWatcher; without
+  // a listener that unhandled 'error' event takes the whole server down.
+  const { url, session } = await boot(t, { watchRetry: [30, 30, 30] });
+  const dead = session.watcher;
+  assert.ok(dead, 'the session watches the specs directory');
+
+  dead.emit('error', new Error('EMFILE: too many open files, watch'));
+  assert.notEqual(session.watcher, dead, 'the dead watcher is dropped');
+
+  const chat = (await j(url + 'api/session')).body.chat;
+  assert.ok(chat.some(e => e.type === 'system' && /file watching stopped .*EMFILE/.test(e.text)), 'the page is told once');
+
+  await sleep(200);
+  assert.ok(session.watcher, 'the watch is re-established on the retry');
+  assert.equal(session.watchAttempt, 0, 'a successful retry resets the backoff');
+  assert.equal((await j(url + 'api/session')).status, 200, 'the server is still serving');
+});
+
+test('a watch that keeps failing gives up rather than retrying forever', { skip }, async t => {
+  const { url, session } = await boot(t, { watchRetry: [10, 10] });
+  session.watch = () => session.watchFailed(new Error('EMFILE: too many open files, watch')); // never recovers
+  session.watcher.emit('error', new Error('EMFILE: too many open files, watch'));
+
+  await sleep(200);
+  const chat = (await j(url + 'api/session')).body.chat;
+  assert.equal(chat.filter(e => /file watching stopped/.test(e.text || '')).length, 1, 'the warning is posted once, not per attempt');
+  assert.ok(chat.some(e => /file watching gave up after 2 attempts/.test(e.text || '')), 'and the give-up is reported');
+  assert.equal((await j(url + 'api/session')).status, 200, 'the server is still serving');
+});

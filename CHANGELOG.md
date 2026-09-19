@@ -5,6 +5,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+
+- A filesystem watch error (for example `EMFILE` under file-descriptor
+  pressure) no longer crashes the server process: the dead watcher is dropped,
+  the page is told that edits made outside it are not picked up, and the watch
+  is retried three times with a short backoff before it gives up.
+
 ### Added
 
 - First packaged release. Previously an internal tool inside a Shopware
