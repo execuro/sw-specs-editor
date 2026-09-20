@@ -234,20 +234,23 @@ test('losing the heartbeat closes the session; agent silence only warns', { skip
   const lockFile = path.join(root, SESSION, 'session.lock');
   assert.ok(fs.existsSync(lockFile));
 
-  // A run is active and the agent has gone quiet well past its timeout.
+  // A run is active and the agent has gone quiet well past the 15-minute silence mark.
   await j(session.url + 'api/batch', { docs: { prd: { notes: [{ id: 'FR-1', text: 'note' }] } } });
   await j(session.url + 'api/next?wait=1');
-  session.lastPoll = Date.now() - 10_000;
+  session.lastPoll = Date.now() - 16 * 60_000;
   session.beat();
   session.tick();
 
   assert.equal(session.closing, undefined, 'silence never ends a run: only `emit done` or the user does');
   assert.equal(session.locks.prd, 'b-1', 'the lock is held for as long as the run lasts');
   assert.equal(session.run.warned, true);
-  const warned = session.chatHistory().filter(e => e.type === 'system' && /no sign of the agent/.test(e.text));
+  assert.equal(session.run.silent, true, 'the page is told the run went quiet, so it can offer Abort');
+  const warned = session.chatHistory().filter(e => e.type === 'system' && /no progress from the agent/.test(e.text));
   assert.equal(warned.length, 1, 'the warning is written once, not on every tick');
   session.tick();
-  assert.equal(session.chatHistory().filter(e => e.type === 'system' && /no sign of the agent/.test(e.text)).length, 1);
+  assert.equal(session.chatHistory().filter(e => e.type === 'system' && /no progress from the agent/.test(e.text)).length, 1);
+  session.polled();
+  assert.equal(session.run.silent, false, 'a progress line clears the quiet flag again');
 
   // The browser tab, however, is what keeps the server alive.
   session.lastBeat = Date.now() - 5_000;

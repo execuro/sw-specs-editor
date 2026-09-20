@@ -628,9 +628,12 @@
     // and a disconnect banner next to it would contradict it. A run that has genuinely
     // lost its agent is recoverable through the Abort control below instead.
     if (!S.closed && !S.serverGone && !S.run && !S.agent.present && (S.agent.everPolled || uptimeSec() > (S.session?.agent?.timeout || 120))) host.append(el('div', { class: 'banner' }, 'Agent disconnected - re-run the skill on this document to resume. The page keeps working; batches wait in the queue.'));
-    if (!S.closed && !S.serverGone && S.run && !S.agent.present) host.append(el('div', { class: 'banner' },
-      'No sign of the agent during this run. It may still be working - the run is never cut off for silence. ',
-      el('button', { class: 'btn sm', title: 'Finish the run as aborted so the documents unlock and queued changes apply', onclick: abortRun }, 'Abort run')));
+    // Only once the server says the run has gone quiet (RUN_SILENCE, 15 min). A normal run
+    // takes minutes and reports nothing between steps, so a banner tied to the 2-minute
+    // presence dot would fire on every healthy run.
+    if (!S.closed && !S.serverGone && S.run?.silent) host.append(el('div', { class: 'banner' },
+      `No progress from the agent for ${Math.round((S.session?.runSilence || 900) / 60)} min. It may still be working on a long step - the editor waits as long as it takes. Abort only if you know its session was closed or interrupted. `,
+      el('button', { class: 'btn sm', title: 'End this run so both documents unlock and your queued changes are applied; edits already written are kept', onclick: abortRun }, 'Abort run')));
     if (Object.values(S.diagramState).includes('fallback')) host.append(el('div', { class: 'banner' }, 'Offline - diagram shown as SVG.'));
     if (S.queuedWrites) { $('#queued-badge').hidden = false; $('#queued-badge').textContent = `${S.queuedWrites} queued`; } else $('#queued-badge').hidden = true;
     // Session dot = is there an agent session loop polling this server right now?
@@ -728,7 +731,7 @@
     es.addEventListener('run', (ev) => {
       const r = JSON.parse(ev.data);
       S.locks = r.locks || S.locks; S.queue = r.queue || [];
-      S.run = r.active ? { id: r.active } : null;
+      S.run = r.active ? { id: r.active, silent: Boolean(r.silent) } : null;
       renderTabs(); renderBanners(); renderDoc();
     });
     es.addEventListener('agent', (ev) => { const a = JSON.parse(ev.data); S.agent.present = a.present; S.agent.everPolled = a.everPolled || S.agent.everPolled; renderBanners(); });

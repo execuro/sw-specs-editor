@@ -17,6 +17,14 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Changed
 
+- The Abort control no longer appears after two minutes of silence. Presence (the
+  header dot) and run silence are now separate: a run is called quiet only after
+  15 minutes of no progress, and a progress line clears it again. A
+  normal run takes five to ten minutes and says nothing between steps, so the old
+  threshold flagged healthy runs. The chat line and the banner say the agent may
+  still be working and that aborting is for a session that was closed or
+  interrupted.
+
 - A batch of nothing but question answers or chat is handled without spawning the
   product-manager, architect or QA agents. Answering a question was costing a full
   analysis wave while the user watched the page.
