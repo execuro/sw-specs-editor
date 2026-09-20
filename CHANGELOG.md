@@ -5,6 +5,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-20
+
 ### Changed
 
 - **BREAKING — a session now edits one document, not a pair.** `start --doc <path>`
@@ -151,5 +153,6 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `scripts/check-version.mjs` — refuses a release whose shipped skill pins a
   different CLI version than `package.json` declares.
 
-[Unreleased]: https://github.com/execuro/sw-specs-editor/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/execuro/sw-specs-editor/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/execuro/sw-specs-editor/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/execuro/sw-specs-editor/compare/v0.1.0...v0.1.1
