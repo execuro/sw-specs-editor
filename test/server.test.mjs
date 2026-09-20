@@ -145,6 +145,43 @@ test('the agent reply unlocks, applies the queued write and releases a waiting p
   assert.deepEqual(woken.body.batch.touched, ['spec']);
 });
 
+test('abort ends a run whose agent will never reply, unlocking and applying queued writes', { skip }, async t => {
+  const { url, session, sse, read } = await boot(t);
+
+  await j(url + 'api/batch', { docs: { prd: { notes: [{ id: 'FR-1', text: 'note' }] } } });
+  await j(url + 'api/next?wait=1');
+  await j(url + 'api/agent/progress', { batch: 'b-1', doc: 'prd', text: 'reading notes' });
+  await j(url + 'api/status', { doc: 'prd', id: 'FR-3', status: 'done' });
+  assert.equal(session.queued.length, 1);
+
+  const aborted = await j(url + 'api/run/abort', { reason: 'aborted from the page' });
+  assert.equal(aborted.status, 200);
+  assert.equal(aborted.body.aborted, 'b-1');
+
+  assert.equal(session.run, null);
+  assert.equal(session.locks.prd, null, 'the document unlocks');
+  const finished = await sse.wait(e => e.event === 'run' && e.data.state === 'finished');
+  assert.equal(finished.data.aborted, true);
+  assert.match(read('0099-mini.md'), /- \*\*FR-3\*\* \[done\]/, 'the write made while locked is applied');
+  assert.equal(session.queued.length, 0);
+
+  const log = fs.readFileSync(path.join(session.root, SESSION, 'chat.jsonl'), 'utf8');
+  assert.match(log, /"text":"run aborted: aborted from the page","batch":"b-1"/);
+
+  // With the run gone, a queued batch can start.
+  await j(url + 'api/batch', { docs: { spec: { notes: [{ id: 'AC-2', text: 'next' }] } } });
+  const next = await j(url + 'api/next?wait=1');
+  assert.equal(next.body.batch.id, 'b-2');
+});
+
+test('abort with no run open is a no-op', { skip }, async t => {
+  const { url, session } = await boot(t);
+  const r = await j(url + 'api/run/abort', { reason: 'nothing to abort' });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.aborted, null);
+  assert.equal(session.run, null);
+});
+
 test('emit progress and chat reach the chat log and the page', { skip }, async t => {
   const { root, url, session, sse } = await boot(t);
 

@@ -51,6 +51,6 @@ Nothing goes to the terminal during a batch beyond what the tools print — the 
 ## Notes
 
 - Status tags (`[done]` / `[partly]`) are read-only labels on the page, written by the implementing and verifying skills. Picking an option on a question card writes its tick directly. Neither needs a design-skill run; the design skill still runs to anchor and log an answer when the batch is sent.
-- A run that spawns a helper agent can stay silent for a while. The server never aborts a run for silence, but emit progress before and after every spawn so the page's presence indicator stays alive.
+- A run that spawns a helper agent can stay silent for a while. The server never aborts a run for silence, but emit progress before and after every spawn so the page's presence indicator stays alive. If a run's agent is gone for good (the session was interrupted), the user ends it with **Abort run** on the page; the documents unlock and whatever they queued meanwhile is applied.
 - Everything under `specs/.editor/` is session state and gitignored. The `.excalidraw` and `.graph.json` files next to the documents are tracked.
 - Only the browser needs the network, for the Excalidraw bundle. Offline, diagrams show their stored SVG.

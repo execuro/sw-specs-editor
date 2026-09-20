@@ -5,7 +5,29 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **Abort run** on the page, and `POST /api/run/abort` behind it. A batch is
+  delivered under a lease: the documents stay locked until the agent replies, and
+  the server deliberately never times a run out, because killing a long one would
+  be worse. When the agent is gone for good - the session was interrupted, the
+  worker died - nothing was ever going to send that reply and every page write
+  piled up behind it. Aborting finishes the run, unlocks the documents and applies
+  what was queued; edits the agent already wrote are kept.
+
 ### Changed
+
+- A batch of nothing but question answers or chat is handled without spawning the
+  product-manager, architect or QA agents. Answering a question was costing a full
+  analysis wave while the user watched the page.
+
+- Progress lines are kept few and short - one line per phase, no per-tool
+  narration. They are the page's only sign of life while a helper agent runs, so
+  they still bracket every spawn; they are just no longer a running commentary.
+
+- The disconnect banner no longer contradicts the header. While a run is open the
+  page says "agent working" and offers **Abort run** instead of telling the user
+  to re-run a skill that is already running.
 
 - The chat no longer repeats the session banner of every past run. Older
   `session started/resumed/closed` lines collapse into a single muted

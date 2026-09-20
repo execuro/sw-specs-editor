@@ -86,12 +86,17 @@ Exit codes: 0 success, 1 server unreachable, 2 usage error.
 | Queued | Everything not yet sent — block comments, question answers, diagram requests — collects in the collapsible **Queued (n)** accordion at the top of the chat panel, under the **Agent** header. ✕ drops one item, **Clear** drops them all, **Send (n)** ships them together with whatever is in the box. A sent batch stays in the chat as a collapsed **Sent (n)** entry above the reply |
 | Diagrams | Excalidraw canvas per linked diagram. Edits save to the `.excalidraw` file; **Ask agent to regenerate** rebuilds it from the graph file |
 | Status labels | `open` / `partly` / `done` on FRs and ACs are read-only here; the implementing and verifying skills set them |
+| Abort run | Appears beside the run banner when the agent has gone quiet mid-run. Ends the run, unlocks the documents and applies everything queued behind it. Edits already written stay |
 
 ### What happens when you send
 
 1. The page posts the batch; the touched document is locked and the tab shows **agent working**.
-2. The session runs `sw-design-requirements` (PRD notes) or `sw-design-solution` (spec notes) in editor mode. The skill reads the batch, checks only the concepts the notes touch, anchors answers into the right sections, logs them, removes answered question rows and rescores. It never asks in the terminal: a new gap becomes a question row with options.
+2. The session runs `sw-design-requirements` (PRD notes) or `sw-design-solution` (spec notes) in editor mode. The skill reads the batch, checks only the concepts the notes touch, anchors answers into the right sections, logs them, removes answered question rows and rescores. It never asks in the terminal: a new gap becomes a question row with options. A batch of nothing but question answers and chat skips the helper agents entirely.
 3. The reply lands in the chat with links to the changed blocks, which are highlighted until the next send.
+
+A run is never cut off for being quiet - a long one must not be killed by a
+timer. If its agent is gone for good, **Abort run** on the page ends it, unlocks
+the documents and applies whatever you changed while it was locked.
 
 A note that belongs to the other document (a business change on the spec, a technical note on the PRD)
 is answered in chat and not applied. Re-add it on the other tab.
@@ -156,6 +161,7 @@ No telemetry, no self-update, no third-party hosting, and no binding beyond
 | `POST /api/status` | `{doc, id, status}` → rewrites the tag on that line; `202` + queued while the document is locked |
 | `POST /api/answer` | `{doc, id, option}` / `{doc, id, text}` / `{doc, id}` → ticks/unticks the question's answer; `202` + queued while the document is locked |
 | `POST /api/diagram` | `{doc, id, scene, svg}` → writes `.excalidraw` + SVG; `202` while locked |
+| `POST /api/run/abort` | `{reason}` → end a run whose agent will never reply: unlock every document it holds, apply queued writes, release the queue |
 | `POST /api/close` | end the session |
 | `GET /api/next?wait=<s>` | **agent** long-poll → `{event:"batch"}` / `idle` / `closed`; reserves the batch, locks and snapshots the touched documents. The reservation is only final once the agent acknowledges it through one of the `/api/agent/*` endpoints: a poll that dies before the response is written rolls it back, and an unacknowledged run is re-delivered to the next poll, so a killed `poll` never loses a batch. Agent presence = a poll or progress line within `--agent-timeout` (120 s); silence is reported once in chat and never acted on: a run ends only on `emit done` or Stop |
 | `POST /api/agent/progress` / `chat` / `reply` | **agent** progress line, interim message, final reply per document (verify + repair, diff, unlock, apply queued) |

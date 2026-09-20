@@ -154,7 +154,7 @@
   function updateSendButton() {
     const b = $('#chat-send'), n = S.notes.length, text = ($('#chat-text') && $('#chat-text').value || '').trim();
     b.disabled = S.closed || (!n && !text);
-    b.textContent = (n ? `Send (${n})` : 'Send') + (S.run ? ' · queues' : '');
+    b.textContent = n ? `Send (${n})` : 'Send';
   }
 
   async function sendBatch(chatText) {
@@ -624,7 +624,13 @@
     if (S.closed) host.append(el('div', { class: 'banner bad' }, 'Session ended. Re-run the skill to open it again.'));
     else if (S.serverGone) host.append(el('div', { class: 'banner bad' }, 'Server unreachable - the session may have ended (heartbeat timeout or stop).'));
     for (const d of ['prd', 'spec']) if (S.locks[d]) host.append(el('div', { class: 'banner info' }, `Agent working on ${docLabel(d)} - diagram saves and status updates on this document are queued until the run ends.`));
-    if (!S.closed && !S.serverGone && !S.agent.present && (S.agent.everPolled || uptimeSec() > (S.session?.agent?.timeout || 120))) host.append(el('div', { class: 'banner' }, 'Agent disconnected - re-run the skill on this document to resume. The page keeps working; batches wait in the queue.'));
+    // Only while no run is open: during a run the header already says "agent working",
+    // and a disconnect banner next to it would contradict it. A run that has genuinely
+    // lost its agent is recoverable through the Abort control below instead.
+    if (!S.closed && !S.serverGone && !S.run && !S.agent.present && (S.agent.everPolled || uptimeSec() > (S.session?.agent?.timeout || 120))) host.append(el('div', { class: 'banner' }, 'Agent disconnected - re-run the skill on this document to resume. The page keeps working; batches wait in the queue.'));
+    if (!S.closed && !S.serverGone && S.run && !S.agent.present) host.append(el('div', { class: 'banner' },
+      'No sign of the agent during this run. It may still be working - the run is never cut off for silence. ',
+      el('button', { class: 'btn sm', title: 'Finish the run as aborted so the documents unlock and queued changes apply', onclick: abortRun }, 'Abort run')));
     if (Object.values(S.diagramState).includes('fallback')) host.append(el('div', { class: 'banner' }, 'Offline - diagram shown as SVG.'));
     if (S.queuedWrites) { $('#queued-badge').hidden = false; $('#queued-badge').textContent = `${S.queuedWrites} queued`; } else $('#queued-badge').hidden = true;
     // Session dot = is there an agent session loop polling this server right now?
@@ -634,17 +640,22 @@
     dot.className = 'dot ' + state;
     txt.className = 'muted ' + state;
     txt.textContent = S.closed ? 'session closed' : S.serverGone ? 'server unreachable'
-      : S.run ? `agent working · ${S.run.id}` + (S.queue.length ? ` · ${S.queue.length} queued` : '')
+      : S.run ? 'agent working' + (S.queue.length ? ` · ${S.queue.length} waiting` : '')
       : S.agent.present ? 'agent connected' : 'agent not connected';
     dot.title = txt.title = S.closed ? 'The session has ended.' : S.serverGone ? 'The editor server does not answer.'
       : S.run ? 'The agent session is processing a batch.'
       : S.agent.present ? 'The skill session loop is polling this server; notes you send are processed right away.'
       : 'No skill session loop is polling this server. Notes you send wait in the queue - re-run sw-specs-editor (or the design skill with --editor) on this document to resume.';
-    const as = $('#agent-state'); as.className = 'agent-state ' + state;
-    as.textContent = S.run ? 'working' : S.agent.present ? 'connected' : S.closed || S.serverGone ? 'offline' : 'not connected';
     updateSendButton();
   }
   function uptimeSec() { return S.session?.started ? (Date.now() - Date.parse(S.session.started)) / 1000 : 0; }
+  // A batch is delivered under a lease: the documents stay locked until the agent
+  // replies. If the agent is gone for good nothing will ever send that reply, so the
+  // user ends the run by hand. Edits the agent already wrote to the file are kept.
+  async function abortRun() {
+    if (!S.run || !confirm('Abort this run? Edits already applied stay; the message is marked aborted.')) return;
+    try { await api('/api/run/abort', { reason: 'aborted from the page' }); } catch (e) { alert('Abort failed: ' + e.message); }
+  }
 
   // ---------------------------------------------------------------- chat
   function renderChat() {
@@ -674,7 +685,7 @@
     return el('div', { class: 'msg agent' }, el('div', { class: 'm-head' }, 'agent · working'), body);
   }
   function batchBubble(e) {
-    const m = el('div', { class: 'msg user' }, el('div', { class: 'm-head' }, 'you · ' + e.id, e.queued ? el('span', { class: 'badge' }, 'queued') : null));
+    const m = el('div', { class: 'msg user' }, el('div', { class: 'm-head' }, 'you', e.queued ? el('span', { class: 'badge' }, 'queued') : null));
     const notes = Object.entries(e.docs || {}).flatMap(([d, v]) => (v.notes || []).map(n => [d, n]));
     if (notes.length) {
       m.append(el('details', { class: 'sent' },
