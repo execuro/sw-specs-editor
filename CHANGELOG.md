@@ -7,6 +7,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Added
 
+- **Clear cache** in the Agent panel head, and `POST /api/cache/clear` behind it. A
+  session inherits the previous one's chat log - which the agent reads as its run
+  context - and any batch left pending in `queue.json`, which the next poll is handed.
+  A stray instruction therefore keeps re-running on every start. Clearing aborts an
+  open run, empties the queue and `batches/`, truncates the chat and resets the batch
+  counter. The documents, the unsent notes and the deferred page writes stay as they are.
+
 - **Abort run** on the page, and `POST /api/run/abort` behind it. A batch is
   delivered under a lease: the documents stay locked until the agent replies, and
   the server deliberately never times a run out, because killing a long one would
@@ -16,6 +23,8 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   what was queued; edits the agent already wrote are kept.
 
 ### Changed
+
+- The Queued list's **Clear** button only appears when something is queued.
 
 - The Abort control no longer appears after two minutes of silence. Presence (the
   header dot) and run silence are now separate: a run is called quiet only after

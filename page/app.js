@@ -122,6 +122,7 @@
     box.classList.toggle('collapsed', !S.queuedOpen);
     $('#queued-toggle').setAttribute('aria-expanded', String(S.queuedOpen));
     $('#queued-count').textContent = S.notes.length ? `(${S.notes.length})` : '';
+    $('#queued-clear').hidden = !S.notes.length;
     host.innerHTML = '';
     if (!S.notes.length) host.append(el('div', { class: 'q-empty' }, 'No queued messages'));
     else for (const n of S.notes) host.append(queuedRow(n));
@@ -660,6 +661,14 @@
     try { await api('/api/run/abort', { reason: 'aborted from the page' }); } catch (e) { alert('Abort failed: ' + e.message); }
   }
 
+  // Instructions from an earlier session live on in the chat log the agent reads as
+  // context and in any batch left pending, which the next session redelivers. This wipes
+  // both so the conversation starts clean; the documents are not touched.
+  async function clearCache() {
+    if (!confirm('Clear the agent conversation and any pending batches? The PRD and tech spec are not touched.')) return;
+    try { await api('/api/cache/clear', {}); await load(); } catch (e) { alert('Clear failed: ' + e.message); }
+  }
+
   // ---------------------------------------------------------------- chat
   function renderChat() {
     const host = $('#chat'); host.innerHTML = '';
@@ -704,7 +713,7 @@
     return m;
   }
   function replyBubble(e, progressLines) {
-    const m = el('div', { class: 'msg agent' }, el('div', { class: 'm-head' }, 'agent', e.doc ? el('span', { class: 'badge ' + e.doc }, docLabel(e.doc)) : null, e.batch ? el('span', { class: 'muted' }, e.batch) : null, e.interim ? el('span', { class: 'badge' }, 'interim') : null));
+    const m = el('div', { class: 'msg agent' }, el('div', { class: 'm-head' }, 'agent', e.doc ? el('span', { class: 'badge ' + e.doc }, docLabel(e.doc)) : null, e.interim ? el('span', { class: 'badge' }, 'interim') : null));
     const body = el('div', { class: 'm-body' }); body.innerHTML = linkifyIds(md(e.md || ''));
     if (e.doc) body.querySelectorAll('a[data-goto]').forEach(a => { a.dataset.doc = e.doc; });
     m.append(body);
@@ -765,6 +774,7 @@
   $('#chat-send').addEventListener('click', () => sendBatch($('#chat-text').value));
   $('#queued-toggle').addEventListener('click', () => { S.queuedOpen = !S.queuedOpen; renderQueued(); });
   $('#queued-clear').addEventListener('click', clearQueued);
+  $('#agent-clear').addEventListener('click', clearCache);
   // Enter sends; Shift/Ctrl/⌘/Alt+Enter insert a new line (IME composition Enter is left alone).
   $('#chat-text').addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' || e.isComposing) return;

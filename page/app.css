@@ -246,7 +246,7 @@ table.blk-table tr.row-blk.noted td:first-child { box-shadow: inset 2px 0 0 var(
 .q-toggle .caret::before { content: "\25be"; display: inline-block; transition: transform .12s; }
 .queued.collapsed .q-toggle .caret::before { transform: rotate(-90deg); }
 .queued.collapsed .q-list { display: none; }
-.q-head .btn { padding: 1px 7px; font-size: 11px; }
+.q-head .btn, .panel-head .btn { padding: 1px 7px; font-size: 11px; }
 .q-list { overflow-y: auto; padding: 0 12px 8px; flex: 1; min-height: 0; }
 .q-empty { color: var(--muted-2); font-style: italic; font-size: 12px; padding: 4px 0 2px; }
 .q-row { display: flex; align-items: flex-start; gap: 6px; padding: 4px 0; border-top: 1px solid var(--line-soft); font-size: 12.5px; }

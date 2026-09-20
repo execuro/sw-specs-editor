@@ -145,6 +145,38 @@ test('the agent reply unlocks, applies the queued write and releases a waiting p
   assert.deepEqual(woken.body.batch.touched, ['spec']);
 });
 
+test('clearing the cache ends the conversation and stops the next session replaying it', { skip }, async t => {
+  const { url, session } = await boot(t);
+
+  // One batch delivered and still open, one left pending behind it.
+  await j(url + 'api/batch', { docs: { prd: { notes: [{ id: 'FR-1', text: 'do the thing' }] } } });
+  await j(url + 'api/next?wait=1');
+  await j(url + 'api/agent/progress', { batch: 'b-1', doc: 'prd', text: 'reading notes' });
+  await j(url + 'api/batch', { docs: { spec: { notes: [{ id: 'AC-2', text: 'and this' }] } } });
+  assert.equal(session.queue.length, 1);
+
+  const cleared = await j(url + 'api/cache/clear', {});
+  assert.equal(cleared.status, 200);
+
+  assert.equal(session.run, null, 'an open run is aborted first, so the documents unlock');
+  assert.equal(session.locks.prd, null);
+  assert.equal(session.queue.length, 0, 'the pending batch is gone');
+  assert.deepEqual(fs.readdirSync(path.join(session.root, SESSION, 'batches')), []);
+  assert.equal(fs.existsSync(path.join(session.root, SESSION, 'queue.json')), true, 'the manifest is rewritten, not left stale');
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(session.root, SESSION, 'queue.json'), 'utf8')), { pending: [], inFlight: null });
+
+  const history = session.chatHistory();
+  assert.equal(history.length, 1, 'only the line announcing the wipe is left');
+  assert.match(history[0].text, /conversation cleared/);
+
+  // The point of the feature: nothing is replayed on the next start.
+  assert.equal(session.batchSeq, 0);
+  await j(url + 'api/batch', { docs: { prd: { notes: [{ id: 'FR-1', text: 'fresh start' }] } } });
+  const next = await j(url + 'api/next?wait=1');
+  assert.equal(next.body.batch.id, 'b-1', 'numbering starts over');
+  assert.equal(next.body.batch.docs.prd.notes[0].text, 'fresh start');
+});
+
 test('abort ends a run whose agent will never reply, unlocking and applying queued writes', { skip }, async t => {
   const { url, session, sse, read } = await boot(t);
 
