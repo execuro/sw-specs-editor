@@ -83,16 +83,17 @@ test('SVG output escapes the characters that would break the markup', () => {
   assert.ok(nasty.includes('&lt;g&gt;') && nasty.includes('a &lt; b') && nasty.includes('&quot;x&quot;'));
 });
 
-test('defaultSvgPath puts the SVG in the document session folder, for PRD and spec alike', () => {
+test('defaultSvgPath puts the SVG in the session folder of the document it belongs to', () => {
   assert.equal(
     defaultSvgPath('specs/0099-mini.domain.excalidraw'),
-    path.join('specs', '.editor', '0099-mini', 'domain.svg'),
+    path.join('specs', '.editor', '0099-mini-prd', 'domain.svg'),
   );
-  // The `-spec` suffix names the same session as the PRD it belongs to.
+  // The `-spec` suffix names the spec's own session, not the PRD's - they are
+  // separate sessions, and the server serves each SVG out of its own folder.
   assert.equal(
     defaultSvgPath('specs/0099-mini-spec.architecture.excalidraw'),
-    path.join('specs', '.editor', '0099-mini', 'architecture.svg'),
+    path.join('specs', '.editor', '0099-mini-spec', 'architecture.svg'),
   );
   // A name with no diagram suffix still lands somewhere sane.
-  assert.equal(defaultSvgPath('specs/0099-mini.excalidraw'), path.join('specs', '.editor', '0099-mini', 'diagram.svg'));
+  assert.equal(defaultSvgPath('specs/0099-mini.excalidraw'), path.join('specs', '.editor', '0099-mini-prd', 'diagram.svg'));
 });

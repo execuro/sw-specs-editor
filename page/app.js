@@ -3,9 +3,12 @@
   'use strict';
 
   // ---------------------------------------------------------------- state
+  // One session, one editable document - the `{prd, spec}` maps this page used to
+  // carry are what let a note or a tick reach the other one. `reference` says
+  // where the sibling is, never what is in it.
   const S = {
-    session: null, paths: {}, docs: { prd: null, spec: null }, active: 'prd',
-    notes: [], chat: [], changed: { prd: new Set(), spec: new Set() }, locks: { prd: null, spec: null },
+    session: null, doc: 'prd', path: '', model: null, reference: null,
+    notes: [], chat: [], changed: new Set(), lock: null,
     queuedWrites: 0, agent: { present: false, everPolled: false }, run: null, queue: [], closed: false, serverGone: false,
     diagrams: new Map(), tab: Math.random().toString(36).slice(2, 10), diagramState: {},
     annotate: false, openNotes: new Set(), ownPending: new Set(), ownFocus: null, queuedOpen: true,
@@ -47,8 +50,8 @@
     return out;
   }
   function walk(b, out) { out.push(b); (b.children || []).forEach(c => walk(c, out)); (b.parts || []).forEach(c => walk(c, out)); }
-  function findBlock(doc, id) { return allBlocks(S.docs[doc]).find(b => b.id === id) || null; }
-  function findByHash(doc, hash) { return hash ? allBlocks(S.docs[doc]).find(b => b.hash === hash) || null : null; }
+  function findBlock(id) { return allBlocks(S.model).find(b => b.id === id) || null; }
+  function findByHash(hash) { return hash ? allBlocks(S.model).find(b => b.hash === hash) || null : null; }
   function blockText(b) {
     if (!b) return '';
     if (b.kind === 'question') return b.question;
@@ -70,31 +73,30 @@
    * Locator every block-bound note carries - id, breadcrumb and line range: enough for the design skill
    * to find the block by path + line range, verify by md/hash, and fall back to the quote if lines shifted.
    */
-  function noteContext(block, doc) {
+  function noteContext(block) {
     return {
-      doc, file: S.paths?.[doc] || S.docs[doc]?.path || null,
+      doc: S.doc, file: S.path || S.model?.path || null,
       block: block.id, blockKind: block.kind, path: (block.path || []).join(' › '),
       line: block.line ?? null, endLine: block.endLine ?? block.line ?? null, hash: block.hash,
       quote: blockText(block).slice(0, 200), md: blockMarkdown(block).slice(0, 2000),
     };
   }
-  function docLabel(doc) {
+  function docLabel(doc = S.doc) {
     const n = (S.session?.slug || '').match(/^\d+/)?.[0] || '';
     return doc === 'prd' ? (n ? `PRD-${n}` : 'PRD') : (n ? `Spec ${n}` : 'Tech spec');
   }
 
   /** Ticks/unticks the answer in the file to match the note; best effort, ignored on failure or while queued (202). */
-  function syncAnswer(doc, id, answer) {
-    const body = { doc, id, ...(answer && answer.option ? { option: answer.option } : answer && answer.text != null ? { text: answer.text } : {}) };
+  function syncAnswer(id, answer) {
+    const body = { id, ...(answer && answer.option ? { option: answer.option } : answer && answer.text != null ? { text: answer.text } : {}) };
     api('/api/answer', body).catch(() => {});
   }
 
   // ---------------------------------------------------------------- notes
-  function noteFor(block, doc) { return S.notes.find(n => n.doc === doc && n.block === block && n.kind !== 'answer'); }
+  function noteFor(block) { return S.notes.find(n => n.block === block && n.kind !== 'answer'); }
   function addNote(n) {
     n.id = n.id || 'n' + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
-    n.doc = n.doc || S.active;
-    if (n.kind === 'answer') S.notes = S.notes.filter(x => !(x.kind === 'answer' && x.block === n.block && x.doc === n.doc));
+    if (n.kind === 'answer') S.notes = S.notes.filter(x => !(x.kind === 'answer' && x.block === n.block));
     S.notes.push(n);
     S.queuedOpen = true;
     saveNotes(); renderQueued(); markNoted();
@@ -104,16 +106,15 @@
   function rebindNotes() {
     for (const n of S.notes) {
       if (!n.block || n.kind === 'free') continue;
-      const model = S.docs[n.doc];
-      if (!model) { n.missing = true; continue; }
-      const hit = findByHash(n.doc, n.hash) || findBlock(n.doc, n.block);
-      if (hit) { Object.assign(n, noteContext(hit, n.doc)); n.missing = false; continue; }
+      if (!S.model) { n.missing = true; continue; }
+      const hit = findByHash(n.hash) || findBlock(n.block);
+      if (hit) { Object.assign(n, noteContext(hit)); n.missing = false; continue; }
       n.missing = true;
     }
   }
   function markNoted() {
     document.querySelectorAll('.blk.noted, tr.noted').forEach(e => e.classList.remove('noted'));
-    for (const n of S.notes) if (n.doc === S.active && n.block) document.querySelectorAll(`[data-id="${CSS.escape(n.block)}"]`).forEach(e => e.classList.add('noted'));
+    for (const n of S.notes) if (n.block) document.querySelectorAll(`[data-id="${CSS.escape(n.block)}"]`).forEach(e => e.classList.add('noted'));
   }
   function renderQueued() {
     const box = $('#queued'), host = $('#queued-list'), chat = $('#chat');
@@ -132,9 +133,8 @@
   function queuedRow(n) {
     const title = [n.missing ? 'block missing - the referenced block no longer exists' : null, n.path ? n.path + (n.line ? ` · L${n.line}${n.endLine && n.endLine !== n.line ? '–' + n.endLine : ''}` : '') : null, n.quote ? '“' + n.quote + '”' : null, n.selection].filter(Boolean).join('\n');
     const row = el('div', { class: 'q-row' + (n.missing ? ' missing' : ''), dataset: { nid: n.id }, title: title || null },
-      el('span', { class: 'badge ' + n.doc }, docLabel(n.doc)),
       n.missing ? el('span', { class: 'q-kind' }, '⚠') : null,
-      n.block ? el('span', { class: 'q-ref', onclick: () => gotoBlock(n.block, n.doc) }, n.block) : el('span', { class: 'q-kind' }, n.kind),
+      n.block ? el('span', { class: 'q-ref', onclick: () => gotoBlock(n.block) }, n.block) : el('span', { class: 'q-kind' }, n.kind),
       n.option ? el('span', { class: 'q-kind' }, 'opt ' + n.option) : null,
       el('div', { class: 'q-text' }, n.text || (n.kind === 'answer' ? '(option only)' : '')),
       el('button', { class: 'q-x', type: 'button', title: 'Remove from the batch', onclick: () => removeQueued(n) }, '✕'));
@@ -142,14 +142,14 @@
   }
   function removeQueued(n) {
     S.notes = S.notes.filter(x => x !== n);
-    if (n.kind === 'answer' && n.block) syncAnswer(n.doc, n.block, null);
+    if (n.kind === 'answer' && n.block) syncAnswer(n.block, null);
     saveNotes(); renderQueued(); markNoted(); renderDoc();
   }
   function clearQueued() {
     if (!S.notes.length) return;
     if (!confirm(`Remove all ${S.notes.length} queued item(s)? Nothing is sent to the agent.`)) return;
     const gone = S.notes; S.notes = [];
-    for (const n of gone) if (n.kind === 'answer' && n.block) syncAnswer(n.doc, n.block, null);
+    for (const n of gone) if (n.kind === 'answer' && n.block) syncAnswer(n.block, null);
     saveNotes(); renderQueued(); markNoted(); renderDoc();
   }
   function updateSendButton() {
@@ -159,7 +159,7 @@
   }
 
   async function sendBatch(chatText) {
-    const body = { docs: { prd: { notes: S.notes.filter(n => n.doc === 'prd') }, spec: { notes: S.notes.filter(n => n.doc === 'spec') } }, chat: chatText || '', chatDoc: S.active, remaining: [] };
+    const body = { notes: S.notes, chat: chatText || '', remaining: [] };
     if (!S.notes.length && !(chatText || '').trim()) return;
     if (!S.agent.present) {
       if (!confirm('The agent is not connected (no session loop polling). The batch will wait in the queue until the skill is (re)started. Send anyway?')) return;
@@ -167,7 +167,7 @@
     try {
       const r = await api('/api/batch', body);
       S.notes = []; S.queuedOpen = true; saveNotes(); renderQueued(); markNoted();
-      S.changed.prd.clear(); S.changed.spec.clear();
+      S.changed.clear();
       $('#chat-text').value = ''; $('#chat-text').style.height = '';
       renderDoc();
       return r;
@@ -175,7 +175,7 @@
   }
 
   // ---------------------------------------------------------------- note popover (floats next to the annotated block)
-  const pop = { open: false, doc: null, id: null, ctx: null, existing: null, selection: '', selOffset: null };
+  const pop = { open: false, id: null, ctx: null, existing: null, selection: '', selOffset: null };
   const popEl = () => $('#note-popover');
   function anchorEl() { return pop.id ? document.querySelector(`#doc [data-id="${CSS.escape(pop.id)}"]`) : null; }
   function closeNoteEditors() {
@@ -185,13 +185,13 @@
     document.querySelectorAll('#doc .anchored').forEach(e => e.classList.remove('anchored'));
   }
   /** extra: { selection, selOffset } — selOffset is the highlighted range's rect relative to the block, so the popover can follow the text. */
-  function openNoteEditor(blockEl, block, doc, extra = {}) {
+  function openNoteEditor(blockEl, block, extra = {}) {
     const p = popEl();
-    if (pop.open && pop.id === block.id && pop.doc === doc && !extra.selection) { p.querySelector('textarea').focus(); return; }
+    if (pop.open && pop.id === block.id && !extra.selection) { p.querySelector('textarea').focus(); return; }
     closeNoteEditors();
-    const existing = noteFor(block.id, doc);
-    const ctx = noteContext(block, doc);
-    Object.assign(pop, { open: true, doc, id: block.id, ctx, existing, selection: extra.selection || '', selOffset: extra.selOffset || null });
+    const existing = noteFor(block.id);
+    const ctx = noteContext(block);
+    Object.assign(pop, { open: true, id: block.id, ctx, existing, selection: extra.selection || '', selOffset: extra.selOffset || null });
     const meta = p.querySelector('.ne-ctx'); meta.innerHTML = '';
     meta.append(el('span', { class: 'id' }, block.id), el('span', { class: 'muted' }, ' ' + [ctx.path, ctx.line ? `L${ctx.line}${ctx.endLine !== ctx.line ? '–' + ctx.endLine : ''}` : ''].filter(Boolean).join(' · ')));
     const sel = p.querySelector('.ne-sel'); sel.hidden = !pop.selection; sel.textContent = pop.selection ? '“' + pop.selection + '”' : '';
@@ -287,7 +287,7 @@
     const pressed = pressedBlock; pressedBlock = null;
     if (!blockEl || blockEl !== pressed) return;
     if (e.target.closest(INTERACTIVE)) return;
-    const block = findBlock(S.active, blockEl.dataset.id);
+    const block = findBlock(blockEl.dataset.id);
     if (!block) return;
     const selection = selectionInside(blockEl);
     let selOffset = null;
@@ -295,7 +295,7 @@
       const rr = window.getSelection().getRangeAt(0).getBoundingClientRect(), br = blockEl.getBoundingClientRect();
       if (rr.width || rr.height) selOffset = { dx: rr.left - br.left, dy: rr.top - br.top, w: rr.width, h: rr.height };
     }
-    openNoteEditor(blockEl, block, S.active, selection ? { selection, selOffset } : {});
+    openNoteEditor(blockEl, block, selection ? { selection, selOffset } : {});
   });
   $('#annotate-toggle').addEventListener('change', (e) => setAnnotate(e.target.checked));
   document.addEventListener('keydown', (e) => {
@@ -306,9 +306,9 @@
   try { if (localStorage.getItem(ANNOTATE_KEY) === '1') setAnnotate(true, false); } catch { /* storage unavailable */ }
 
   // ---------------------------------------------------------------- block rendering
-  function changedMark(id, doc) { return S.changed[doc].has(id) ? el('span', { class: 'changed-mark' }, 'changed') : null; }
-  function blk(block, doc, extraClass, ...content) {
-    const d = el('div', { class: `blk ${block.kind} ${extraClass || ''}` + (S.changed[doc].has(block.id) ? ' changed' : ''), dataset: { id: block.id, kind: block.kind } }, ...content);
+  function changedMark(id) { return S.changed.has(id) ? el('span', { class: 'changed-mark' }, 'changed') : null; }
+  function blk(block, extraClass, ...content) {
+    const d = el('div', { class: `blk ${block.kind} ${extraClass || ''}` + (S.changed.has(block.id) ? ' changed' : ''), dataset: { id: block.id, kind: block.kind } }, ...content);
     return d;
   }
   /** Read-only status label: the tag is set by agents and skills, never by hand in the page. */
@@ -318,51 +318,51 @@
   }
   function renderMd(text) { const d = el('div', { class: 'md' }); d.innerHTML = linkifyIds(md(text)); return d; }
 
-  function renderBlock(block, doc) {
+  function renderBlock(block) {
     switch (block.kind) {
-      case 'section': return renderSection(block, doc, true);
+      case 'section': return renderSection(block, true);
       case 'group': {
         const g = el('div', { class: 'group' }, el('div', { class: 'group-title' }, block.title));
-        block.children.forEach(c => g.append(renderBlock(c, doc)));
+        block.children.forEach(c => g.append(renderBlock(c)));
         return g;
       }
-      case 'item': return renderItem(block, doc);
-      case 'table': return renderTable(block, doc);
-      case 'question': return renderQuestion(block, doc);
-      case 'diagram': return blk(block, doc, '', el('span', { class: 'muted' }, 'Diagram: '), el('a', { href: '#' + block.id, dataset: { goto: block.id } }, block.file), el('span', { class: 'muted' }, ' (shown in Diagrams)'));
-      case 'code': { const b = blk(block, doc, '', renderMd(block.md)); return b; }
-      default: return blk(block, doc, '', renderMd(block.md), changedMark(block.id, doc));
+      case 'item': return renderItem(block);
+      case 'table': return renderTable(block);
+      case 'question': return renderQuestion(block);
+      case 'diagram': return blk(block, '', el('span', { class: 'muted' }, 'Diagram: '), el('a', { href: '#' + block.id, dataset: { goto: block.id } }, block.file), el('span', { class: 'muted' }, ' (shown in Diagrams)'));
+      case 'code': { const b = blk(block, '', renderMd(block.md)); return b; }
+      default: return blk(block, '', renderMd(block.md), changedMark(block.id));
     }
   }
-  function renderSection(sec, doc, nested) {
+  function renderSection(sec, nested) {
     const host = el('div', { class: nested ? 'subsection' : 'section-inner' });
     if (nested) host.append(el('h3', {}, sec.title));
-    sec.children.forEach(c => host.append(renderBlock(c, doc)));
+    sec.children.forEach(c => host.append(renderBlock(c)));
     if (!sec.children.length) host.append(el('div', { class: 'muted' }, '(empty)'));
     return host;
   }
-  function renderItem(block, doc) {
+  function renderItem(block) {
     const body = el('div', { class: 'item-body' });
     body.innerHTML = linkifyIds(md(block.md || ''));
-    const head = el('div', { class: 'item-head' }, el('span', { class: 'item-id' }, block.id), body, statusToggle(block, doc), changedMark(block.id, doc));
-    const node = blk(block, doc, '', head);
+    const head = el('div', { class: 'item-head' }, el('span', { class: 'item-id' }, block.id), body, statusToggle(block), changedMark(block.id));
+    const node = blk(block, '', head);
     if (block.parts) {
       const parts = el('div', { class: 'parts' });
       for (const p of block.parts) {
         const pb = el('div', { class: 'md' }); pb.innerHTML = linkifyIds(md(p.md || ''));
-        parts.append(blk(p, doc, 'part', el('div', { class: 'item-head' }, el('span', { class: 'part-label' }, p.label), pb, statusToggle(p, doc), changedMark(p.id, doc))));
+        parts.append(blk(p, 'part', el('div', { class: 'item-head' }, el('span', { class: 'part-label' }, p.label), pb, statusToggle(p), changedMark(p.id))));
       }
       node.append(parts);
     }
-    if (block.children) block.children.forEach(c => node.append(renderBlock(c, doc)));
+    if (block.children) block.children.forEach(c => node.append(renderBlock(c)));
     return node;
   }
-  function renderTable(t, doc) {
+  function renderTable(t) {
     const table = el('table', { class: 'blk-table', dataset: { id: t.id } });
     const thead = el('thead', {}, el('tr', {}, ...t.header.map(h => el('th', {}, h))));
     const tbody = el('tbody');
     for (const r of t.children) {
-      const tr = el('tr', { class: 'row-blk blk' + (S.changed[doc].has(r.id) ? ' changed' : ''), dataset: { id: r.id, kind: r.kind } });
+      const tr = el('tr', { class: 'row-blk blk' + (S.changed.has(r.id) ? ' changed' : ''), dataset: { id: r.id, kind: r.kind } });
       const cells = r.kind === 'question' ? [r.id, (r.kindTag ? `[${r.kindTag}] ` : '') + r.question, r.blocks.join(', '), r.options.map(o => `${o.id}: ${o.text}${o.recommended ? ' (recommended)' : ''}`).join('<br>'), r.agentNotes.map(n => `[${n.agent}] ${n.text}`).join('<br>')] : r.cells;
       for (const c of cells) { const td = el('td'); td.innerHTML = linkifyIds(mdInline(String(c).replace(/<br\s*\/?>/gi, '\n'))).replace(/\n/g, '<br>'); tr.append(td); }
       tbody.append(tr);
@@ -393,16 +393,16 @@
     return wrap;
   }
 
-  function renderQuestion(q, doc) {
+  function renderQuestion(q) {
     // Checked state: the pending note if there is one, else the tick already in the file.
-    const noteAnswer = S.notes.find(n => n.kind === 'answer' && n.doc === doc && n.block === q.id);
+    const noteAnswer = S.notes.find(n => n.kind === 'answer' && n.block === q.id);
     const answer = noteAnswer || (q.answer ? { option: q.answer.option, text: q.answer.text } : null);
-    const card = el('div', { class: 'question blk' + (S.changed[doc].has(q.id) ? ' changed' : ''), dataset: { id: q.id, kind: 'question' } });
+    const card = el('div', { class: 'question blk' + (S.changed.has(q.id) ? ' changed' : ''), dataset: { id: q.id, kind: 'question' } });
     // Meta row (id · kind · blocks) above the full-width question text so long questions never get squeezed.
     const meta = el('div', { class: 'q-meta' }, el('span', { class: 'id' }, q.id));
     if (q.kindTag) meta.append(el('span', { class: 'badge' }, q.kindTag === 'adr' ? 'ADR decision' : 'readiness gate'));
     if (q.blocks.length) meta.append(el('span', { class: 'q-blocks' }, el('span', { class: 'lbl' }, 'blocks'), ...q.blocks.map(b => el('a', { href: '#' + b, dataset: { goto: b } }, b))));
-    const cm = changedMark(q.id, doc); if (cm) meta.append(cm);
+    const cm = changedMark(q.id); if (cm) meta.append(cm);
     const text = el('div', { class: 'q-text' }); text.innerHTML = linkifyIds(mdInline(q.question));
     card.append(meta, text);
     let options = q.options;
@@ -418,15 +418,15 @@
       return host && host.id === id ? [...own, ...loose] : own;
     };
     if (loose.length && !host) meta.append(agentInfo(loose, q.id + ':q'));
-    const radioName = 'q-' + doc + '-' + q.id;
+    const radioName = 'q-' + q.id;
     const list = el('div', { class: q.kindTag ? 'decision' : 'options' });
     for (const o of options) {
       const optText = el('span', { class: 'opt-text' }); optText.innerHTML = linkifyIds(mdInline(o.text));
       const opt = el('label', { class: 'option' + (answer?.option === o.id ? ' selected' : '') },
         el('input', { type: 'radio', name: radioName, value: o.id, ...(answer?.option === o.id ? { checked: '' } : {}), onchange: () => {
-          S.ownPending.delete(doc + ':' + q.id); S.ownFocus = null;
-          addNote({ kind: 'answer', ...noteContext(q, doc), option: o.id, text: `Chose option ${o.id}: ${o.text}` });
-          syncAnswer(doc, q.id, { option: o.id });
+          S.ownPending.delete(q.id); S.ownFocus = null;
+          addNote({ kind: 'answer', ...noteContext(q), option: o.id, text: `Chose option ${o.id}: ${o.text}` });
+          syncAnswer(q.id, { option: o.id });
           renderDoc();
         } }),
         el('span', { class: 'opt-id' }, o.id), optText, o.recommended ? el('span', { class: 'rec' }, 'recommended') : el('span'));
@@ -437,7 +437,7 @@
     // Own answer: one more radio in the same group, with an inline text field. Picking it drops a
     // chosen option; the answer note is written once the text is saved (Enter / Save / blur).
     const ownSelected = Boolean(answer && !answer.option);
-    const ownKey = doc + ':' + q.id;
+    const ownKey = q.id;
     // "own picked, nothing typed yet" lives in S.ownPending so the server's doc event (which
     // re-renders the card after the tick is cleared in the file) does not bounce the radio back.
     const ownChecked = ownSelected || (!answer && S.ownPending.has(ownKey));
@@ -446,7 +446,7 @@
       S.ownPending.add(ownKey); S.ownFocus = ownKey;
       if (answer && answer.option) {
         // Drop the chosen option: the note (if any), the tick in the file, and the local model.
-        S.notes = S.notes.filter(x => x !== answer); q.answer = null; syncAnswer(doc, q.id, null);
+        S.notes = S.notes.filter(x => x !== answer); q.answer = null; syncAnswer(q.id, null);
         saveNotes(); renderQueued(); markNoted(); renderDoc();
       }
       const again = document.querySelector(`#doc .question[data-id="${CSS.escape(q.id)}"] .own-input`);
@@ -455,11 +455,11 @@
     const saveOwn = () => {
       const text = input.value.trim();
       S.ownFocus = null;
-      if (!text) { if (ownSelected) { S.ownPending.add(ownKey); S.notes = S.notes.filter(x => x !== answer); q.answer = null; syncAnswer(doc, q.id, null); saveNotes(); renderQueued(); markNoted(); renderDoc(); } return; }
+      if (!text) { if (ownSelected) { S.ownPending.add(ownKey); S.notes = S.notes.filter(x => x !== answer); q.answer = null; syncAnswer(q.id, null); saveNotes(); renderQueued(); markNoted(); renderDoc(); } return; }
       if (ownSelected && text === (answer.text || '')) return;
       S.ownPending.delete(ownKey);
-      addNote({ kind: 'answer', ...noteContext(q, doc), text });
-      syncAnswer(doc, q.id, { text });
+      addNote({ kind: 'answer', ...noteContext(q), text });
+      syncAnswer(q.id, { text });
       renderDoc();
     };
     if (S.ownFocus === ownKey) queueMicrotask(() => { if (document.contains(input) && document.activeElement !== input) input.focus(); });
@@ -474,8 +474,10 @@
     return card;
   }
 
-  function renderDiagram(block, doc) {
-    const key = doc + ':' + block.id;
+  function renderDiagram(block) {
+    // One document per session, so the block id alone is unique - it used to be
+    // prefixed with the document to keep the two apart in one page.
+    const key = block.id;
     const wrap = el('div', { class: 'diagram blk', dataset: { id: block.id, kind: 'diagram' } });
     const svgRel = (S.session?.dir || '') + '/' + block.name + '.svg';
     const head = el('div', { class: 'd-head' }, el('span', { class: 'd-name' }, block.name), el('code', {}, block.file), el('span', { class: 'spacer' }),
@@ -483,16 +485,16 @@
       el('button', { class: 'btn sm', onclick: () => {
         if (!confirm('Ask the agent to regenerate this diagram from its graph file? Manual edits in the canvas will be overwritten.')) return;
         const text = prompt('What should change in the diagram? (optional)', '') || '';
-        addNote({ kind: 'diagram', ...noteContext(block, doc), quote: block.file, text: 'regenerate' + (text ? ': ' + text : '') });
-      } }, 'Ask agent to regenerate'), changedMark(block.id, doc));
+        addNote({ kind: 'diagram', ...noteContext(block), quote: block.file, text: 'regenerate' + (text ? ': ' + text : '') });
+      } }, 'Ask agent to regenerate'), changedMark(block.id));
     const canvas = el('div', { class: 'canvas' });
     wrap.append(head, canvas);
     const prev = S.diagrams.get(key);
     if (prev?.handle) prev.handle.destroy();
     const handle = window.SpecsDiagram.mount(canvas, {
-      file: block.file, svg: svgRel, doc, id: block.id,
+      file: block.file, svg: svgRel, doc: S.doc, id: block.id,
       onSave: async (scene, svg) => {
-        const r = await api('/api/diagram', { doc, id: block.id, scene, svg });
+        const r = await api('/api/diagram', { id: block.id, scene, svg });
         if (r._status === 202) throw new Error('queued until the current run ends');
       },
       onState: (st) => { S.diagramState[key] = st; renderBanners(); },
@@ -502,13 +504,13 @@
   }
 
   // ---------------------------------------------------------------- overview
-  function renderOverview(model, doc) {
+  function renderOverview(model) {
     const m = model.meta;
     const ready = /ready/i.test(m.status || '');
     const kpi = (k, v, small) => el('div', { class: 'kpi' }, el('div', { class: 'k' }, k), el('div', { class: 'v' + (small ? ' small' : '') }, v));
     const grid = el('div', { class: 'overview' });
     grid.append(kpi('Status', el('span', { class: 'pill ' + (ready ? 'ready' : 'progress') }, m.status || 'unknown')));
-    if (doc === 'prd') {
+    if (S.doc === 'prd') {
       grid.append(kpi('Confidence', m.confidence != null ? m.confidence + '%' : '—'));
       grid.append(kpi('Open questions', `${m.openQuestions}`));
       { // "Domain impact — long explanation" → tile shows the name, the explanation goes to a tooltip.
@@ -530,47 +532,50 @@
 
   // ---------------------------------------------------------------- document
   function renderDoc() {
-    const doc = S.active;
-    const model = S.docs[doc];
+    const doc = S.doc;
+    const model = S.model;
     const host = $('#doc');
-    for (const [k, v] of S.diagrams) if (k.startsWith(doc + ':')) { v.handle?.destroy(); S.diagrams.delete(k); }
+    for (const [k, v] of S.diagrams) { v.handle?.destroy(); S.diagrams.delete(k); }
     const scrollY = host.scrollTop || window.scrollY;
     host.innerHTML = '';
     if (!model) {
-      host.append(el('div', { class: 'card empty' }, doc === 'spec' ? 'No tech spec yet for this PRD.' : 'No PRD found next to this spec.'));
-      if (doc === 'spec') host.append(el('div', { class: 'card' }, el('button', { class: 'btn primary', onclick: createSpec }, 'Create tech spec'), el('span', { class: 'muted' }, ' Runs sw-design-solution on the PRD through the agent session.')));
+      // No Create button: the tech spec is a separate session, started by the
+      // user with its own command, so the page states the fact and stops.
+      host.append(el('div', { class: 'card empty' }, doc === 'spec'
+        ? `${S.path} does not exist yet. Ask the agent on this page to draft it, or close the session.`
+        : `${S.path} not found.`));
       return;
     }
     const L = model.layout;
     const byId = (id) => id ? allBlocks(model).find(b => b.id === id) : null;
     host.append(el('h1', { class: 'doc-title' }, model.title || model.path));
-    host.append(renderOverview(model, doc));
+    host.append(renderOverview(model));
 
     // Open questions
     const qs = allBlocks(model).filter(b => b.kind === 'question');
     const qCard = el('div', { class: 'card' }, el('h2', {}, 'Open questions', el('span', { class: 'count' }, `(${qs.length})`)));
     if (!qs.length) qCard.append(el('div', { class: 'muted' }, 'none'));
-    qs.forEach(q => qCard.append(renderQuestion(q, doc)));
+    qs.forEach(q => qCard.append(renderQuestion(q)));
     host.append(qCard);
 
     // Scope / out of scope
     const inScope = byId(L.scopeIn), outScope = byId(L.outOfScope);
-    if (inScope) host.append(el('div', { class: 'card' }, el('h2', {}, 'Scope'), ...(inScope.children || []).map(c => renderBlock(c, doc))));
-    if (outScope) host.append(el('div', { class: 'card' }, el('h2', {}, 'Out of scope'), ...(outScope.children || []).map(c => renderBlock(c, doc))));
-    if (L.scope && !inScope && !outScope) { const s = byId(L.scope); host.append(el('div', { class: 'card' }, el('h2', {}, 'Scope'), renderSection(s, doc, false))); }
+    if (inScope) host.append(el('div', { class: 'card' }, el('h2', {}, 'Scope'), ...(inScope.children || []).map(c => renderBlock(c))));
+    if (outScope) host.append(el('div', { class: 'card' }, el('h2', {}, 'Out of scope'), ...(outScope.children || []).map(c => renderBlock(c))));
+    if (L.scope && !inScope && !outScope) { const s = byId(L.scope); host.append(el('div', { class: 'card' }, el('h2', {}, 'Scope'), renderSection(s, false))); }
 
     // Diagrams
     const dCard = el('div', { class: 'card' }, el('h2', {}, 'Diagrams'));
     const diagrams = allBlocks(model).filter(b => b.kind === 'diagram');
     if (!diagrams.length) dCard.append(el('div', { class: 'muted' }, doc === 'prd' ? 'No domain diagram linked yet - ask the agent for one ("add a domain model diagram").' : 'No architecture diagram linked yet - ask the agent for one.'));
-    diagrams.forEach(d => dCard.append(renderDiagram(d, doc)));
+    diagrams.forEach(d => dCard.append(renderDiagram(d)));
     host.append(dCard);
 
     // Requirements / per-AC
     const req = byId(L.requirements);
-    if (req) host.append(el('div', { class: 'card' }, el('h2', {}, doc === 'prd' ? 'Requirements' : 'Per-AC implementation plan'), renderSection(req, doc, false)));
+    if (req) host.append(el('div', { class: 'card' }, el('h2', {}, doc === 'prd' ? 'Requirements' : 'Per-AC implementation plan'), renderSection(req, false)));
     const acc = byId(L.acceptance);
-    if (acc) host.append(el('div', { class: 'card' }, el('h2', {}, 'Acceptance criteria'), renderSection(acc, doc, false)));
+    if (acc) host.append(el('div', { class: 'card' }, el('h2', {}, 'Acceptance criteria'), renderSection(acc, false)));
 
     // Details
     const det = el('details', { class: 'card' }, el('summary', {}, 'Details', el('span', { class: 'count' }, `(${L.details.length} sections)`)));
@@ -579,7 +584,7 @@
     for (const id of L.details) {
       const s = byId(id); if (!s) continue;
       const sub = el('div', { class: 'subsection blk', dataset: { id: s.id, kind: 'section' } }, el('h3', {}, s.title));
-      s.children.forEach(c => sub.append(renderBlock(c, doc)));
+      s.children.forEach(c => sub.append(renderBlock(c)));
       det.append(sub);
     }
     host.append(det);
@@ -588,14 +593,30 @@
     positionPopover();
   }
 
-  async function createSpec() {
-    if (!confirm('Ask the agent to create the tech spec for this PRD now?')) return;
-    try { await api('/api/batch', { docs: { prd: { notes: [] }, spec: { notes: [] } }, chat: 'Create the tech spec for this PRD (sw-design-solution, new mode).', chatDoc: 'prd', createSpec: true, remaining: S.notes }); }
-    catch (e) { alert(e.message); }
+  /**
+   * The hand-off. A finished PRD names the command and stops there: the tech spec
+   * is a separate session, and starting it from here is what used to mix the two
+   * documents' histories. The trigger is the status the design skill wrote - the
+   * page must not re-derive the rule behind it, and `^ready for specification`
+   * keeps the spec's own "Ready for implementation" from lighting this.
+   */
+  function readyBanner() {
+    if (S.doc !== 'prd' || !S.reference || !/^ready for specification/i.test(S.model?.meta?.status || '')) return null;
+    return el('div', { class: 'banner good' },
+      'Ready for Technical Specification. The tech spec is a separate session - run ',
+      copyableCommand(`sw-design-solution ${S.reference.pathRel} --editor`),
+      ' in your agent. This PRD session stays open.');
   }
 
-  function gotoBlock(id, doc) {
-    if (doc && doc !== S.active && S.docs[doc]) { S.active = doc; renderTabs(); renderDoc(); }
+  /** A command the user would otherwise retype. Copying it is not dispatching it. */
+  function copyableCommand(cmd) {
+    const code = el('code', { class: 'cmd', title: 'Click to copy', onclick: () => {
+      navigator.clipboard?.writeText(cmd).then(() => { code.classList.add('copied'); setTimeout(() => code.classList.remove('copied'), 1200); }).catch(() => {});
+    } }, cmd);
+    return code;
+  }
+
+  function gotoBlock(id) {
     const target = document.querySelector(`[data-id="${CSS.escape(id)}"]`);
     if (!target) { const det = $('details.card'); if (det && !det.open) { det.open = true; S.detailsOpen = true; return gotoBlock(id); } return; }
     const det = target.closest('details'); if (det) det.open = true;
@@ -604,27 +625,24 @@
   }
   document.addEventListener('click', (e) => {
     const a = e.target.closest('a[data-goto]');
-    if (a) { e.preventDefault(); gotoBlock(a.dataset.goto, a.dataset.doc || null); }
+    if (a) { e.preventDefault(); gotoBlock(a.dataset.goto); }
   });
 
   // ---------------------------------------------------------------- tabs, banners, header
-  function renderTabs() {
-    const host = $('#tabs'); host.innerHTML = '';
-    for (const d of ['prd', 'spec']) {
-      const present = Boolean(S.docs[d]);
-      const b = el('button', { class: 'tab' + (S.active === d ? ' active' : ''), onclick: () => { S.active = d; renderTabs(); renderDoc(); } }, docLabel(d));
-      if (!present && d === 'prd') b.disabled = true;
-      if (!present && d === 'spec') b.append(el('span', { class: 'badge' }, 'create'));
-      if (S.locks[d]) b.append(el('span', { class: 'badge medium' }, 'agent working'));
-      host.append(b);
-    }
-    document.title = `${docLabel(S.active)} · Specs Editor`;
+  /** The header names the one document. It replaces the tab bar: there is no second tab. */
+  function renderChip() {
+    const host = $('#doc-chip'); host.innerHTML = '';
+    const chip = el('div', { class: 'doc-chip-inner ' + S.doc, title: S.path }, docLabel());
+    if (S.lock) chip.append(el('span', { class: 'badge medium' }, 'agent working'));
+    host.append(chip);
+    document.title = `${docLabel()} · Specs Editor`;
   }
   function renderBanners() {
     const host = $('#banners'); host.innerHTML = '';
     if (S.closed) host.append(el('div', { class: 'banner bad' }, 'Session ended. Re-run the skill to open it again.'));
     else if (S.serverGone) host.append(el('div', { class: 'banner bad' }, 'Server unreachable - the session may have ended (heartbeat timeout or stop).'));
-    for (const d of ['prd', 'spec']) if (S.locks[d]) host.append(el('div', { class: 'banner info' }, `Agent working on ${docLabel(d)} - diagram saves and status updates on this document are queued until the run ends.`));
+    if (S.lock) host.append(el('div', { class: 'banner info' }, `Agent working on ${docLabel()} - diagram saves and status updates are queued until the run ends.`));
+    host.append(readyBanner());
     // Only while no run is open: during a run the header already says "agent working",
     // and a disconnect banner next to it would contradict it. A run that has genuinely
     // lost its agent is recoverable through the Abort control below instead.
@@ -634,7 +652,7 @@
     // presence dot would fire on every healthy run.
     if (!S.closed && !S.serverGone && S.run?.silent) host.append(el('div', { class: 'banner' },
       `No progress from the agent for ${Math.round((S.session?.runSilence || 900) / 60)} min. It may still be working on a long step - the editor waits as long as it takes. Abort only if you know its session was closed or interrupted. `,
-      el('button', { class: 'btn sm', title: 'End this run so both documents unlock and your queued changes are applied; edits already written are kept', onclick: abortRun }, 'Abort run')));
+      el('button', { class: 'btn sm', title: 'End this run so the document unlocks and your queued changes are applied; edits already written are kept', onclick: abortRun }, 'Abort run')));
     if (Object.values(S.diagramState).includes('fallback')) host.append(el('div', { class: 'banner' }, 'Offline - diagram shown as SVG.'));
     if (S.queuedWrites) { $('#queued-badge').hidden = false; $('#queued-badge').textContent = `${S.queuedWrites} queued`; } else $('#queued-badge').hidden = true;
     // Session dot = is there an agent session loop polling this server right now?
@@ -698,13 +716,12 @@
   }
   function batchBubble(e) {
     const m = el('div', { class: 'msg user' }, el('div', { class: 'm-head' }, 'you', e.queued ? el('span', { class: 'badge' }, 'queued') : null));
-    const notes = Object.entries(e.docs || {}).flatMap(([d, v]) => (v.notes || []).map(n => [d, n]));
+    const notes = e.notes || [];
     if (notes.length) {
       m.append(el('details', { class: 'sent' },
         el('summary', {}, `Sent (${notes.length})`),
-        el('ul', { class: 'note-list' }, ...notes.map(([d, n]) => el('li', {},
-          el('span', { class: 'badge ' + d }, docLabel(d)), ' ',
-          n.block ? el('a', { href: '#' + n.block, dataset: { goto: n.block, doc: d } }, n.block) : null,
+        el('ul', { class: 'note-list' }, ...notes.map(n => el('li', {},
+          n.block ? el('a', { href: '#' + n.block, dataset: { goto: n.block } }, n.block) : null,
           n.block ? ' ' : '',
           n.kind === 'answer' && n.option ? `option ${n.option}` + (n.text ? ' - ' : '') : '',
           n.text || '')))));
@@ -713,11 +730,11 @@
     return m;
   }
   function replyBubble(e, progressLines) {
-    const m = el('div', { class: 'msg agent' }, el('div', { class: 'm-head' }, 'agent', e.doc ? el('span', { class: 'badge ' + e.doc }, docLabel(e.doc)) : null, e.interim ? el('span', { class: 'badge' }, 'interim') : null));
+    // No document badge: every line in this log is this session's one document.
+    const m = el('div', { class: 'msg agent' }, el('div', { class: 'm-head' }, 'agent', e.interim ? el('span', { class: 'badge' }, 'interim') : null));
     const body = el('div', { class: 'm-body' }); body.innerHTML = linkifyIds(md(e.md || ''));
-    if (e.doc) body.querySelectorAll('a[data-goto]').forEach(a => { a.dataset.doc = e.doc; });
     m.append(body);
-    if (e.changed?.length) m.append(el('div', { class: 'changed-links' }, el('span', { class: 'muted' }, 'changed: '), ...e.changed.slice(0, 40).map(id => el('a', { href: '#' + id, dataset: { goto: id, doc: e.doc || '' } }, id))));
+    if (e.changed?.length) m.append(el('div', { class: 'changed-links' }, el('span', { class: 'muted' }, 'changed: '), ...e.changed.slice(0, 40).map(id => el('a', { href: '#' + id, dataset: { goto: id } }, id))));
     if (e.repairs?.length) m.append(el('div', { class: 'repairs' }, 'repaired: ' + e.repairs.join('; ')));
     if (progressLines?.length) m.append(el('details', { class: 'progress-log' }, el('summary', {}, `progress log (${progressLines.length})`), ...progressLines.map(l => el('div', {}, '› ' + l))));
     return m;
@@ -729,38 +746,37 @@
     es.addEventListener('hello', (ev) => { S.serverGone = false; applySession(JSON.parse(ev.data).session); renderBanners(); });
     es.addEventListener('doc', (ev) => {
       const d = JSON.parse(ev.data);
-      S.docs[d.doc] = d.model;
-      for (const id of [...(d.changed || []), ...(d.added || [])]) S.changed[d.doc].add(id);
+      S.model = d.model;
+      for (const id of [...(d.changed || []), ...(d.added || [])]) S.changed.add(id);
       rebindNotes(); renderQueued();
-      if (d.doc === S.active || !S.docs[S.active]) renderDoc();
-      renderTabs();
+      renderDoc(); renderChip(); renderBanners();
     });
     es.addEventListener('chat', (ev) => { S.chat.push(JSON.parse(ev.data)); renderChat(); });
     es.addEventListener('progress', () => { /* chat event carries it too */ });
     es.addEventListener('run', (ev) => {
       const r = JSON.parse(ev.data);
-      S.locks = r.locks || S.locks; S.queue = r.queue || [];
+      if ('lock' in r) S.lock = r.lock; S.queue = r.queue || [];
       S.run = r.active ? { id: r.active, silent: Boolean(r.silent) } : null;
-      renderTabs(); renderBanners(); renderDoc();
+      renderChip(); renderBanners(); renderDoc();
     });
     es.addEventListener('agent', (ev) => { const a = JSON.parse(ev.data); S.agent.present = a.present; S.agent.everPolled = a.everPolled || S.agent.everPolled; renderBanners(); });
     es.addEventListener('queued', (ev) => { S.queuedWrites = JSON.parse(ev.data).count; renderBanners(); });
     es.addEventListener('notes', (ev) => { const n = JSON.parse(ev.data); if (n.tab && n.tab !== S.tab) { S.notes = n.notes || []; rebindNotes(); renderQueued(); markNoted(); } });
-    es.addEventListener('diagram', (ev) => { const d = JSON.parse(ev.data); const h = S.diagrams.get(d.doc + ':' + d.id); if (h?.handle) h.handle.reload(); });
+    es.addEventListener('diagram', (ev) => { const d = JSON.parse(ev.data); const h = S.diagrams.get(d.id); if (h?.handle) h.handle.reload(); });
     es.addEventListener('closing', () => { S.closed = true; es.close(); renderBanners(); document.body.append(el('div', { class: 'overlay' }, 'Session ended. You can close this tab.')); });
     es.onerror = () => { if (S.closed) return; S.serverGone = true; renderBanners(); };
     es.onopen = () => { if (S.serverGone) { S.serverGone = false; load(); } };
   }
   function applySession(info) {
-    S.session = info; S.locks = info.locks || S.locks; S.agent = info.agent || S.agent; S.run = info.run; S.queue = info.queue || []; S.queuedWrites = info.queuedWrites || 0;
+    S.session = info; if ('lock' in info) S.lock = info.lock; if (info.doc) S.doc = info.doc; if (info.path) S.path = info.path; S.agent = info.agent || S.agent; S.run = info.run; S.queue = info.queue || []; S.queuedWrites = info.queuedWrites || 0;
   }
 
   async function load() {
     const j = await api('/api/session');
-    applySession(j.session); S.paths = j.paths; S.docs = j.docs; S.notes = j.notes || []; S.chat = j.chat || [];
-    if (!S.docs.prd && S.docs.spec) S.active = 'spec';
-    const want = new URLSearchParams(location.search).get('doc'); if (want && S.docs[want]) S.active = want;
-    rebindNotes(); renderTabs(); renderDoc(); renderQueued(); renderChat(); renderBanners();
+    applySession(j.session);
+    S.doc = j.doc; S.path = j.path; S.model = j.model; S.reference = j.reference || null;
+    S.notes = j.notes || []; S.chat = j.chat || [];
+    rebindNotes(); renderChip(); renderDoc(); renderQueued(); renderChat(); renderBanners();
   }
 
   function heartbeat() {

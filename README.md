@@ -8,6 +8,12 @@ status and edit Excalidraw diagrams. When you send a batch of notes, the agent
 picks it up, does the work, and posts its reply back onto the page. Nothing runs
 until you send something.
 
+**One page, one document.** The filename picks the mode — a path ending in
+`-spec.md` opens a tech-spec session, anything else a PRD session — and the
+other document of the pair is available to the agent read-only, for reference.
+A PRD and its spec are independent sessions with their own chat, queue and port,
+and both can be open at once.
+
 Built for [Shopware](https://www.shopware.com/) PRDs and specs written by the
 [Shopware Ecosystem Agentic Harness](https://github.com/execuro/sw-ecosystem-agentic-harness),
 whose `sw-design-requirements` and `sw-design-solution` skills take `--editor`.
@@ -60,10 +66,11 @@ npx -y @execuro-sw-ecosystem/sw-specs-editor@0.1.1 guide
 
 ```
 sw-specs-editor guide                            # the session protocol - read it first
-sw-specs-editor start   --doc specs/0007-x.md    # prints SPECS_EDITOR_URL=…, detaches; reattaches if already running
+sw-specs-editor start   --doc specs/0007-x.md    # the filename picks the mode: -spec.md => spec session, else PRD
+                                                 # prints SPECS_EDITOR_URL=…, detaches; reattaches if already running
 sw-specs-editor status  --doc specs/0007-x.md    # live session summary; --json for the full payload
 sw-specs-editor poll    --doc specs/0007-x.md    # waits up to 90 s -> batch | idle | closed
-sw-specs-editor stop    --doc specs/0007-x.md
+sw-specs-editor stop    --doc specs/0007-x.md    # only that document's session
 sw-specs-editor migrate --doc specs/0007-x.md    # converts a legacy question table to blocks, no server started
 sw-specs-editor install-skill   [--target <dir>] [--print] [--force]
 sw-specs-editor uninstall-skill [--target <dir>]  # removes only that file, keeps a copy you edited
@@ -78,36 +85,39 @@ Exit codes: 0 success, 1 server unreachable, 2 usage error.
 
 | Area | What you do |
 | --- | --- |
-| Tabs | PRD and tech spec side by side. A missing spec shows **Create tech spec**, which runs `sw-design-solution` in new-spec mode |
+| Header | Names the one document this session edits. There is no tab bar: the other document is a separate session, started with its own command |
 | Overview | Status, confidence, open questions, weakest dimension (PRD) or AC coverage and open ADRs (spec) |
 | Open questions | Pick an option (one is marked recommended, agent notes sit behind the info icon) or choose the ✎ radio and type your own answer. The pick is ticked `[x]` in the markdown at once and also becomes a queued item; the next run anchors it and removes the question |
 | Annotate | Switch in the header (shortcut `A`). Click any block, or highlight text inside it, to attach a comment |
-| Agent | Chat with the agent's progress and replies, full height on the right. Free text typed here counts as a note on the active tab |
+| Agent | Chat with the agent's progress and replies, full height on the right. Free text typed here counts as a note on this document |
 | Queued | Everything not yet sent — block comments, question answers, diagram requests — collects in the collapsible **Queued (n)** accordion at the top of the chat panel, under the **Agent** header. ✕ drops one item, **Clear** drops them all, **Send (n)** ships them together with whatever is in the box. A sent batch stays in the chat as a collapsed **Sent (n)** entry above the reply |
 | Diagrams | Excalidraw canvas per linked diagram. Edits save to the `.excalidraw` file; **Ask agent to regenerate** rebuilds it from the graph file |
 | Status labels | `open` / `partly` / `done` on FRs and ACs are read-only here; the implementing and verifying skills set them |
-| Abort run | Appears beside the run banner when the agent has gone quiet mid-run. Ends the run, unlocks the documents and applies everything queued behind it. Edits already written stay |
+| Abort run | Appears beside the run banner when the agent has gone quiet mid-run. Ends the run, unlocks the document and applies everything queued behind it. Edits already written stay |
+| Ready | A PRD at `Ready for specification` shows a banner naming `sw-design-solution specs/NNNN-slug-spec.md --editor`. A statement, not a button — you start that session yourself, and this one stays open |
 
 ### What happens when you send
 
-1. The page posts the batch; the touched document is locked and the tab shows **agent working**.
-2. The session runs `sw-design-requirements` (PRD notes) or `sw-design-solution` (spec notes) in editor mode. The skill reads the batch, checks only the concepts the notes touch, anchors answers into the right sections, logs them, removes answered question rows and rescores. It never asks in the terminal: a new gap becomes a question row with options. A batch of nothing but question answers and chat skips the helper agents entirely.
+1. The page posts the batch; the document is locked and the header shows **agent working**.
+2. The session runs its own skill — `sw-design-requirements` in a PRD session, `sw-design-solution` in a spec session, decided when the session started and never from the batch body. The skill reads the batch, checks only the concepts the notes touch, anchors answers into the right sections, logs them, removes answered question rows and rescores. It never asks in the terminal: a new gap becomes a question row with options. A batch of nothing but question answers and chat skips the helper agents entirely.
 3. The reply lands in the chat with links to the changed blocks, which are highlighted until the next send.
 
 A run is never cut off for being quiet - a long one must not be killed by a
 timer. If its agent is gone for good, **Abort run** on the page ends it, unlocks
-the documents and applies whatever you changed while it was locked.
+the document and applies whatever you changed while it was locked.
 
 A note that belongs to the other document (a business change on the spec, a technical note on the PRD)
-is answered in chat and not applied. Re-add it on the other tab.
+is answered in chat and not applied — that document is read-only here. Raise it in
+its own session: `sw-design-requirements <prd> --editor` or
+`sw-design-solution <spec> --editor`.
 
 Asking for a full review ("check the whole PRD") is the one note that runs the complete design-skill flow.
 
 ## Where things are written
 
 The project root is the nearest ancestor of your document holding `.git`;
-`--root` overrides it. Session state goes to `<project root>/specs/.editor/<slug>/`
-and is gitignored - never your home directory, and never wherever the command
+`--root` overrides it. Session state goes to `<project root>/specs/.editor/<slug>-prd/`
+or `<slug>-spec/` and is gitignored - never your home directory, and never wherever the command
 happened to be run from. So a command issued from a subdirectory reaches the
 same session as one issued from the root.
 
@@ -133,18 +143,18 @@ No telemetry, no self-update, no third-party hosting, and no binding beyond
 | Path | Role |
 | --- | --- |
 | `bin/cli.mjs` | the one executable; every other file exports `main(argv)` and never reads `process.argv`, so the commands work through an npx `.bin` symlink |
-| `lib/server.mjs` | http server on `127.0.0.1` (random port, `SPECS_EDITOR_PORT` to pin): page, JSON API, SSE, file watcher, batch queue, per-document lock, heartbeat timeout, status-tag and diagram writes, session persistence |
+| `lib/server.mjs` | http server on `127.0.0.1` (random port, `SPECS_EDITOR_PORT` to pin): page, JSON API, SSE, file watcher, batch queue, the document lock, heartbeat timeout, status-tag and diagram writes, session persistence. `resolveDoc` is where one path becomes one session |
 | `lib/paths.mjs` | project-root resolution and the absolute/relative path split |
 | `lib/parse.mjs` | markdown → document model with stable block ids (`FR-3`, `Q-1`, `AC-2.plan`, `s5.p2`, `t8.r1`, `diagram:domain`), both templates, `**Q-n**` question blocks, legacy question table |
 | `lib/diff.mjs` | old vs new model → changed / added / removed ids |
 | `lib/status.mjs` | status-tag and answer-tick rewrite on one line; snapshot + verify/repair after an agent run; legacy question table → blocks |
-| `lib/emit.mjs` | `emit progress\|chat\|done "<text>" [--batch id] [--doc prd\|spec]` — the design skill's only channel to the page |
+| `lib/emit.mjs` | `emit progress\|chat\|done "<text>" [--batch id] [--doc <document path>]` — the design skill's only channel to the page |
 | `lib/diagram.mjs` | `<graph.json> <out.excalidraw> [--svg auto\|none\|<path>]` — deterministic layered layout, SVG fallback |
 | `lib/guide.mjs` | the session protocol, printed by `guide`. The only place it is written down |
 | `page/` | `index.html`, `app.js`, `app.css`, `diagram.js`, `vendor/marked.min.js` — vanilla JS, no build |
 | `skills/sw-specs-editor/` | the stub skill `install-skill` hands to a host |
 
-## Session folder `specs/.editor/<slug>/` (gitignored)
+## Session folder `specs/.editor/<slug>-prd|-spec/` (gitignored)
 
 `session.json`, `session.lock` (pid + url while running), `chat.jsonl`, `notes.json` (unsent notes), `batches/b-N.json`, `snapshot.json` (hashes, tags, diagram lines before a run), `queue.json` (the durable batch queue: order + the batch in flight), `queued.json` (toggles/diagram saves waiting for unlock), `<name>.svg` (diagram exports), `server.log`.
 
@@ -153,18 +163,18 @@ No telemetry, no self-update, no third-party hosting, and no binding beyond
 | Method & path | Purpose |
 | --- | --- |
 | `GET /`, `GET /page/*`, `GET /file?path=specs/…` | page, assets, files under `specs/` |
-| `GET /api/session` | session info (locks, agent liveness), both models, unsent notes, chat history |
+| `GET /api/session` | session info (the lock, agent liveness), this document's model, the sibling's existence and path, unsent notes, chat history |
 | `GET /api/events` | SSE: `hello`, `doc` (model + changed ids), `chat`, `progress`, `run`, `agent`, `queued`, `notes`, `diagram`, `closing` |
 | `POST /api/heartbeat` | tab liveness (5 s); 60 s without any → server exits |
 | `POST /api/notes` | autosave unsent notes |
-| `POST /api/batch` | `{docs:{prd:{notes},spec:{notes}}, chat, chatDoc, createSpec?}` → queued for the agent. Batches are the only trigger for agent work; nothing runs on open |
-| `POST /api/status` | `{doc, id, status}` → rewrites the tag on that line; `202` + queued while the document is locked |
-| `POST /api/answer` | `{doc, id, option}` / `{doc, id, text}` / `{doc, id}` → ticks/unticks the question's answer; `202` + queued while the document is locked |
-| `POST /api/diagram` | `{doc, id, scene, svg}` → writes `.excalidraw` + SVG; `202` while locked |
+| `POST /api/batch` | `{notes, chat}` → queued for the agent. The batch it writes carries `doc`, `path`/`pathRel`, `notes`, `chat` and a read-only `reference` to the sibling. Batches are the only trigger for agent work; nothing runs on open |
+| `POST /api/status` | `{id, status}` → rewrites the tag on that line; `202` + queued while the document is locked. A `doc` naming the other document is `400`, never coerced onto this one |
+| `POST /api/answer` | `{id, option}` / `{id, text}` / `{id}` → ticks/unticks the question's answer; `202` + queued while the document is locked |
+| `POST /api/diagram` | `{id, scene, svg}` → writes `.excalidraw` + SVG; `202` while locked |
 | `POST /api/run/abort` | `{reason}` → end a run whose agent will never reply: unlock every document it holds, apply queued writes, release the queue |
 | `POST /api/cache/clear` | start the conversation over: aborts an open run, empties the batch queue and `batches/`, truncates `chat.jsonl` and resets the batch counter. Documents, notes and deferred page writes are untouched |
 | `POST /api/close` | end the session |
-| `GET /api/next?wait=<s>` | **agent** long-poll → `{event:"batch"}` / `idle` / `closed`; reserves the batch, locks and snapshots the touched documents. The reservation is only final once the agent acknowledges it through one of the `/api/agent/*` endpoints: a poll that dies before the response is written rolls it back, and an unacknowledged run is re-delivered to the next poll, so a killed `poll` never loses a batch. Agent presence = a poll or progress line within `--agent-timeout` (120 s). A run that reports nothing for 15 min is flagged quiet once - in chat and as the page's Abort control - and never acted on: a run ends only on `emit done`, `POST /api/run/abort` or Stop |
+| `GET /api/next?wait=<s>` | **agent** long-poll → `{event:"batch"}` / `idle` / `closed`; reserves the batch, locks and snapshots the session's document. The reservation is only final once the agent acknowledges it through one of the `/api/agent/*` endpoints: a poll that dies before the response is written rolls it back, and an unacknowledged run is re-delivered to the next poll, so a killed `poll` never loses a batch. Agent presence = a poll or progress line within `--agent-timeout` (120 s). A run that reports nothing for 15 min is flagged quiet once - in chat and as the page's Abort control - and never acted on: a run ends only on `emit done`, `POST /api/run/abort` or Stop |
 | `POST /api/agent/progress` / `chat` / `reply` | **agent** progress line, interim message, final reply per document (verify + repair, diff, unlock, apply queued) |
 | `GET /api/lock` | locks, agent liveness, active run, queue |
 | `GET /health` | package name and version, pid, slug, url, start time. `start` probes it: a matching version reattaches, a different one is stopped and restarted |

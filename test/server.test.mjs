@@ -13,7 +13,8 @@ import path from 'node:path';
 import { canBind, hostRepo, j, sseReader, cleanup, startFixtureServer, sleep, run } from './helpers.mjs';
 import { collapseSessions } from '../lib/server.mjs';
 
-const SESSION = 'specs/.editor/0099-mini';
+const SESSION = 'specs/.editor/0099-mini-prd';
+const SPEC_SESSION = 'specs/.editor/0099-mini-spec';
 const bindable = await canBind();
 const skip = !bindable && 'cannot bind 127.0.0.1 in this environment';
 
@@ -53,18 +54,25 @@ test('the page, its assets and files under specs/ are served, and nothing else i
   assert.equal((await fetch(url + 'file?path=specs/missing.md')).status, 404);
 });
 
-test('api/session carries both documents of the pair', { skip }, async t => {
+test('api/session carries one editable document, and the sibling only as reference', { skip }, async t => {
   const { url, session } = await boot(t);
   const { status, body } = await j(url + 'api/session');
   assert.equal(status, 200);
 
-  assert.deepEqual(body.paths, { prd: 'specs/0099-mini.md', spec: 'specs/0099-mini-spec.md' });
-  assert.equal(body.docs.prd.title, 'PRD-0099 — Mini fixture');
-  assert.equal(body.docs.spec.title, 'Tech spec 0099 — Mini fixture');
-  assert.equal(body.docs.spec.doc, 'spec');
+  assert.equal(body.doc, 'prd');
+  assert.equal(body.path, 'specs/0099-mini.md');
+  assert.equal(body.model.title, 'PRD-0099 — Mini fixture');
+  assert.equal(body.model.doc, 'prd');
+
+  // The spec exists next to it, but the page is told only that it is there.
+  // Anything more and the doc-keyed state this split removes grows back.
+  assert.equal(body.reference.pathRel, 'specs/0099-mini-spec.md');
+  assert.equal(body.reference.exists, true);
+  assert.ok(!body.reference.model && !body.reference.blocks && !body.reference.title);
 
   assert.equal(body.session.slug, '0099-mini');
-  assert.deepEqual(body.session.locks, { prd: null, spec: null });
+  assert.equal(body.session.sessionSlug, '0099-mini-prd');
+  assert.equal(body.session.lock, null);
   assert.equal(body.session.agent.present, false);
   assert.equal(body.session.run, null);
   assert.deepEqual(body.notes, []);
@@ -76,10 +84,10 @@ test('api/session carries both documents of the pair', { skip }, async t => {
   assert.equal(lock.pid, process.pid);
 });
 
-test('a batch locks the documents it touches, and a page write queues while locked', { skip }, async t => {
+test('a batch locks the session document, and a page write queues while locked', { skip }, async t => {
   const { url, session, sse } = await boot(t);
 
-  const queued = await j(url + 'api/batch', { docs: { prd: { notes: [{ id: 'FR-1', text: 'tighten this' }] } }, chat: 'please look' });
+  const queued = await j(url + 'api/batch', { notes: [{ id: 'FR-1', text: 'tighten this' }], chat: 'please look' });
   assert.equal(queued.status, 200);
   assert.equal(queued.body.id, 'b-1');
   assert.equal(queued.body.queued, false, 'no run is active, so it is not waiting behind one');
@@ -90,12 +98,11 @@ test('a batch locks the documents it touches, and a page write queues while lock
   const next = await j(url + 'api/next?wait=1');
   assert.equal(next.body.event, 'batch');
   assert.equal(next.body.batch.id, 'b-1');
-  assert.deepEqual(next.body.batch.touched, ['prd']);
+  assert.equal(next.body.batch.doc, 'prd');
   const started = await sse.wait(e => e.event === 'run' && e.data.state === 'started');
   assert.equal(started.data.batch, 'b-1');
 
-  assert.equal(session.locks.prd, 'b-1');
-  assert.equal(session.locks.spec, null, 'an untouched document stays writable');
+  assert.equal(session.lock, 'b-1');
   assert.ok(fs.existsSync(path.join(session.root, SESSION, 'snapshot.json')));
 
   // A status toggle on the locked document is accepted but deferred, not lost.
@@ -104,32 +111,49 @@ test('a batch locks the documents it touches, and a page write queues while lock
   assert.deepEqual(blocked.body, { queued: true, lockedBy: 'b-1' });
   assert.equal(session.queued.length, 1);
   assert.ok(!fs.readFileSync(path.join(session.root, 'specs/0099-mini.md'), 'utf8').includes('**FR-3** [done]'));
+});
 
-  // The unlocked document takes the same write immediately.
-  const direct = await j(url + 'api/status', { doc: 'spec', id: 'AC-2', status: 'partly' });
-  assert.equal(direct.status, 200);
-  assert.equal(direct.body.changed, true);
+test('a write aimed at the other document is refused, not applied to this one', { skip }, async t => {
+  const { root, url } = await boot(t);
+  // This is the defect the split exists to remove: these three endpoints used to
+  // coerce an unknown `doc` to `prd`, so a tick meant for the spec silently
+  // rewrote the PRD.
+  const before = fs.readFileSync(path.join(root, 'specs/0099-mini.md'), 'utf8');
+  const specBefore = fs.readFileSync(path.join(root, 'specs/0099-mini-spec.md'), 'utf8');
+
+  for (const [p, body] of [
+    ['api/status', { doc: 'spec', id: 'AC-2', status: 'partly' }],
+    ['api/answer', { doc: 'spec', id: 'Q-1', option: 'A' }],
+    ['api/diagram', { doc: 'spec', id: 'diagram:architecture', scene: '{}' }],
+  ]) {
+    const r = await j(url + p, body);
+    assert.equal(r.status, 400, `${p} must refuse a write for the other document`);
+    assert.match(r.body.error, /this session edits specs\/0099-mini\.md \(prd\); specs\/0099-mini-spec\.md has its own session/);
+  }
+
+  assert.equal(fs.readFileSync(path.join(root, 'specs/0099-mini.md'), 'utf8'), before, 'the PRD is untouched');
+  assert.equal(fs.readFileSync(path.join(root, 'specs/0099-mini-spec.md'), 'utf8'), specBefore, 'and so is the spec');
 });
 
 test('the agent reply unlocks, applies the queued write and releases a waiting poll', { skip }, async t => {
   const { url, session, sse, read } = await boot(t);
 
-  await j(url + 'api/batch', { docs: { prd: { notes: [{ id: 'FR-1', text: 'note' }] } } });
+  await j(url + 'api/batch', { notes: [{ id: 'FR-1', text: 'note' }] });
   await j(url + 'api/next?wait=1');
   // An agent progress ping is evidence the batch was received, so a
   // later poll parks instead of treating the run as lost and redelivering it.
-  await j(url + 'api/agent/progress', { batch: 'b-1', doc: 'prd', text: 'reading FR-1' });
-  await j(url + 'api/status', { doc: 'prd', id: 'FR-3', status: 'done' });
-  assert.equal(session.locks.prd, 'b-1');
+  await j(url + 'api/agent/progress', { batch: 'b-1', text: 'reading FR-1' });
+  await j(url + 'api/status', { id: 'FR-3', status: 'done' });
+  assert.equal(session.lock, 'b-1');
 
   // A second poll parks: only one run may be active at a time.
   const parked = j(url + 'api/next?wait=5');
 
-  const reply = await j(url + 'api/agent/reply', { batch: 'b-1', doc: 'prd', markdown: 'Tightened FR-1.' });
+  const reply = await j(url + 'api/agent/reply', { batch: 'b-1', markdown: 'Tightened FR-1.' });
   assert.equal(reply.status, 200);
   assert.deepEqual(reply.body.results.map(r => r.doc), ['prd']);
 
-  assert.equal(session.locks.prd, null, 'the reply releases the lock');
+  assert.equal(session.lock, null, 'the reply releases the lock');
   assert.equal(session.run, null);
   await sse.wait(e => e.event === 'run' && e.data.state === 'finished');
 
@@ -138,28 +162,28 @@ test('the agent reply unlocks, applies the queued write and releases a waiting p
   assert.equal(session.queued.length, 0);
 
   // A second batch wakes the parked poll rather than leaving it to time out.
-  await j(url + 'api/batch', { docs: { spec: { notes: [{ id: 'AC-2', text: 'and this' }] } } });
+  await j(url + 'api/batch', { notes: [{ id: 'FR-2', text: 'and this' }] });
   const woken = await parked;
   assert.equal(woken.body.event, 'batch');
   assert.equal(woken.body.batch.id, 'b-2');
-  assert.deepEqual(woken.body.batch.touched, ['spec']);
+  assert.equal(woken.body.batch.doc, 'prd');
 });
 
 test('clearing the cache ends the conversation and stops the next session replaying it', { skip }, async t => {
   const { url, session } = await boot(t);
 
   // One batch delivered and still open, one left pending behind it.
-  await j(url + 'api/batch', { docs: { prd: { notes: [{ id: 'FR-1', text: 'do the thing' }] } } });
+  await j(url + 'api/batch', { notes: [{ id: 'FR-1', text: 'do the thing' }] });
   await j(url + 'api/next?wait=1');
-  await j(url + 'api/agent/progress', { batch: 'b-1', doc: 'prd', text: 'reading notes' });
-  await j(url + 'api/batch', { docs: { spec: { notes: [{ id: 'AC-2', text: 'and this' }] } } });
+  await j(url + 'api/agent/progress', { batch: 'b-1', text: 'reading notes' });
+  await j(url + 'api/batch', { notes: [{ id: 'FR-2', text: 'and this' }] });
   assert.equal(session.queue.length, 1);
 
   const cleared = await j(url + 'api/cache/clear', {});
   assert.equal(cleared.status, 200);
 
-  assert.equal(session.run, null, 'an open run is aborted first, so the documents unlock');
-  assert.equal(session.locks.prd, null);
+  assert.equal(session.run, null, 'an open run is aborted first, so the document unlocks');
+  assert.equal(session.lock, null);
   assert.equal(session.queue.length, 0, 'the pending batch is gone');
   assert.deepEqual(fs.readdirSync(path.join(session.root, SESSION, 'batches')), []);
   assert.equal(fs.existsSync(path.join(session.root, SESSION, 'queue.json')), true, 'the manifest is rewritten, not left stale');
@@ -171,19 +195,19 @@ test('clearing the cache ends the conversation and stops the next session replay
 
   // The point of the feature: nothing is replayed on the next start.
   assert.equal(session.batchSeq, 0);
-  await j(url + 'api/batch', { docs: { prd: { notes: [{ id: 'FR-1', text: 'fresh start' }] } } });
+  await j(url + 'api/batch', { notes: [{ id: 'FR-1', text: 'fresh start' }] });
   const next = await j(url + 'api/next?wait=1');
   assert.equal(next.body.batch.id, 'b-1', 'numbering starts over');
-  assert.equal(next.body.batch.docs.prd.notes[0].text, 'fresh start');
+  assert.equal(next.body.batch.notes[0].text, 'fresh start');
 });
 
 test('abort ends a run whose agent will never reply, unlocking and applying queued writes', { skip }, async t => {
   const { url, session, sse, read } = await boot(t);
 
-  await j(url + 'api/batch', { docs: { prd: { notes: [{ id: 'FR-1', text: 'note' }] } } });
+  await j(url + 'api/batch', { notes: [{ id: 'FR-1', text: 'note' }] });
   await j(url + 'api/next?wait=1');
-  await j(url + 'api/agent/progress', { batch: 'b-1', doc: 'prd', text: 'reading notes' });
-  await j(url + 'api/status', { doc: 'prd', id: 'FR-3', status: 'done' });
+  await j(url + 'api/agent/progress', { batch: 'b-1', text: 'reading notes' });
+  await j(url + 'api/status', { id: 'FR-3', status: 'done' });
   assert.equal(session.queued.length, 1);
 
   const aborted = await j(url + 'api/run/abort', { reason: 'aborted from the page' });
@@ -191,7 +215,7 @@ test('abort ends a run whose agent will never reply, unlocking and applying queu
   assert.equal(aborted.body.aborted, 'b-1');
 
   assert.equal(session.run, null);
-  assert.equal(session.locks.prd, null, 'the document unlocks');
+  assert.equal(session.lock, null, 'the document unlocks');
   const finished = await sse.wait(e => e.event === 'run' && e.data.state === 'finished');
   assert.equal(finished.data.aborted, true);
   assert.match(read('0099-mini.md'), /- \*\*FR-3\*\* \[done\]/, 'the write made while locked is applied');
@@ -201,7 +225,7 @@ test('abort ends a run whose agent will never reply, unlocking and applying queu
   assert.match(log, /"text":"run aborted: aborted from the page","batch":"b-1"/);
 
   // With the run gone, a queued batch can start.
-  await j(url + 'api/batch', { docs: { spec: { notes: [{ id: 'AC-2', text: 'next' }] } } });
+  await j(url + 'api/batch', { notes: [{ id: 'FR-2', text: 'next' }] });
   const next = await j(url + 'api/next?wait=1');
   assert.equal(next.body.batch.id, 'b-2');
 });
@@ -217,24 +241,28 @@ test('abort with no run open is a no-op', { skip }, async t => {
 test('emit progress and chat reach the chat log and the page', { skip }, async t => {
   const { root, url, session, sse } = await boot(t);
 
-  await j(url + 'api/batch', { docs: { prd: { notes: [{ id: 'FR-1', text: 'note' }] } } });
+  await j(url + 'api/batch', { notes: [{ id: 'FR-1', text: 'note' }] });
   await j(url + 'api/next?wait=1');
 
-  // Through the real CLI, because that is how a skill calls it.
-  const progress = await run(['emit', 'progress', 'reading the PRD', '--batch', 'b-1', '--doc', 'prd'], root);
+  // Through the real CLI, because that is how a skill calls it. `--doc` is the
+  // document path now: it names the session, and a feature's PRD and spec are
+  // two of them.
+  const progress = await run(['emit', 'progress', 'reading the PRD', '--batch', 'b-1', '--doc', 'specs/0099-mini.md'], root);
   assert.equal(progress.code, 0, progress.err);
   const onWire = await sse.wait(e => e.event === 'progress');
   assert.equal(onWire.data.text, 'reading the PRD');
   assert.equal(onWire.data.batch, 'b-1');
 
-  const chat = await run(['emit', 'chat', 'one question first', '--batch', 'b-1', '--doc', 'prd'], root);
+  const chat = await run(['emit', 'chat', 'one question first', '--batch', 'b-1', '--doc', 'specs/0099-mini.md'], root);
   assert.equal(chat.code, 0, chat.err);
   await sse.wait(e => e.event === 'chat' && e.data.type === 'reply');
-  assert.equal(session.locks.prd, 'b-1', 'an interim message leaves the run active');
+  assert.equal(session.lock, 'b-1', 'an interim message leaves the run active');
 
+  // The legacy literal still works while only one session is live, so an older
+  // pinned skill degrades instead of failing.
   const done = await run(['emit', 'done', 'finished', '--batch', 'b-1', '--doc', 'prd'], root);
   assert.equal(done.code, 0, done.err);
-  assert.equal(session.locks.prd, null, 'done is the final reply and releases the lock');
+  assert.equal(session.lock, null, 'done is the final reply and releases the lock');
 
   const log = fs.readFileSync(path.join(root, SESSION, 'chat.jsonl'), 'utf8').split('\n').filter(Boolean).map(JSON.parse);
   assert.deepEqual(
@@ -267,14 +295,14 @@ test('losing the heartbeat closes the session; agent silence only warns', { skip
   assert.ok(fs.existsSync(lockFile));
 
   // A run is active and the agent has gone quiet well past the 15-minute silence mark.
-  await j(session.url + 'api/batch', { docs: { prd: { notes: [{ id: 'FR-1', text: 'note' }] } } });
+  await j(session.url + 'api/batch', { notes: [{ id: 'FR-1', text: 'note' }] });
   await j(session.url + 'api/next?wait=1');
   session.lastPoll = Date.now() - 16 * 60_000;
   session.beat();
   session.tick();
 
   assert.equal(session.closing, undefined, 'silence never ends a run: only `emit done` or the user does');
-  assert.equal(session.locks.prd, 'b-1', 'the lock is held for as long as the run lasts');
+  assert.equal(session.lock, 'b-1', 'the lock is held for as long as the run lasts');
   assert.equal(session.run.warned, true);
   assert.equal(session.run.silent, true, 'the page is told the run went quiet, so it can offer Abort');
   const warned = session.chatHistory().filter(e => e.type === 'system' && /no progress from the agent/.test(e.text));

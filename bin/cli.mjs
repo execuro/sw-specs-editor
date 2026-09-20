@@ -36,18 +36,23 @@ const USAGE = `usage: sw-specs-editor <command> [options]
   status   [--doc <path>] [--json] [--root <path>]
   stop     [--doc <path>] [--root <path>]
   poll     [--wait 90] [--reply "<text>"] [--doc <path>] [--root <path>]
-  emit     progress|chat|done "<text>" [--batch <id>] [--doc prd|spec] [--since <iso>] [--root <path>]
-  batch    --kind notes|spec [--doc <path>] - [--root <path>]
+  emit     progress|chat|done "<text>" [--batch <id>] [--doc <path>] [--since <iso>] [--root <path>]
+  batch    --kind notes [--doc <path>] - [--root <path>]
   diagram  <graph.json> <out.excalidraw> [--svg <path>|auto|none]
   migrate  --doc <path> [--root <path>]
   guide    print the session protocol
   install-skill   [--target <dir>] [--print] [--force]   install this package's skill into a host
   uninstall-skill [--target <dir>]                      remove the skill this package installed
 
+A session edits one document; the filename picks the mode: a path ending in
+-spec.md opens a tech-spec session, anything else a PRD session. A PRD and its
+spec are separate sessions and may run side by side, so pass --doc <path>
+whenever both are open.
+
 The project root is taken from the document: the nearest ancestor holding .git,
 or the current directory when there is no document. --root overrides it. Session
-state always lands in <project root>/specs/.editor/<slug>/, whatever directory
-the command was run from.
+state always lands in <project root>/specs/.editor/<slug>-prd/ or <slug>-spec/,
+whatever directory the command was run from.
 
 Run \`sw-specs-editor guide\` first: it is the current session protocol.`;
 
@@ -68,12 +73,12 @@ if (!load) {
 const SERVER_COMMANDS = ['start', 'status', 'stop', 'migrate'];
 // Only the commands that take a --doc need to turn one into a session
 // directory, and only they pay for loading the server module.
-const NEEDS_RESOLVE = ['poll', 'batch'];
+const NEEDS_RESOLVE = ['poll', 'batch', 'emit'];
 
 try {
   const mod = await load();
   const args = SERVER_COMMANDS.includes(cmd) ? argv : argv.slice(1);
-  const ctx = NEEDS_RESOLVE.includes(cmd) ? { resolvePair: (await import('../lib/server.mjs')).resolvePair } : {};
+  const ctx = NEEDS_RESOLVE.includes(cmd) ? { resolveDoc: (await import('../lib/server.mjs')).resolveDoc } : {};
   await mod.main(args, ctx);
 } catch (e) {
   process.stderr.write(`${e?.stack || e?.message || e}\n`);

@@ -5,15 +5,24 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
 import { parseArgs, withElapsed } from '../lib/emit.mjs';
 import { run, hostRepo } from './helpers.mjs';
 
 test('parseArgs separates the flags from the text, and withElapsed prefixes the elapsed time', () => {
-  const o = parseArgs(['progress', 'doing', 'the', 'thing', '--batch', 'b-7', '--doc', 'spec', '--since', '2026-09-15T10:00:00Z']);
+  const o = parseArgs(['progress', 'doing', 'the', 'thing', '--batch', 'b-7', '--doc', 'specs/0099-mini-spec.md', '--since', '2026-09-15T10:00:00Z']);
   assert.equal(o.batch, 'b-7');
-  assert.equal(o.doc, 'spec');
+  assert.ok(o.doc.endsWith(path.join('specs', '0099-mini-spec.md')), '--doc is a document path and is canonicalised');
   assert.equal(o.since, '2026-09-15T10:00:00Z');
   assert.deepEqual(o.rest, ['progress', 'doing', 'the', 'thing'], 'the command and its text stay in order');
+
+  // A skill pinned to an older CLI still passes the pair-side literal. It names
+  // nothing on disk, so it is dropped rather than canonicalised into a bogus
+  // path, and the single-live-session rule applies - which is how that skill
+  // behaved before the split.
+  const legacy = parseArgs(['progress', 'hi', '--doc', 'prd']);
+  assert.equal(legacy.doc, '');
+  assert.equal(legacy.legacyDoc, 'prd');
 
   // A missing timestamp must never cost the agent its message.
   assert.equal(withElapsed('hello', ''), 'hello');

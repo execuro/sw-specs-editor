@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { sessionSlugFor } from '../lib/parse.mjs';
 
 export const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const PKG = path.join(HERE, '..');
@@ -164,7 +165,7 @@ export const sleep = ms => new Promise(r => setTimeout(r, ms));
  */
 export async function teardown(root, doc = 'specs/0099-mini.md') {
   try { await run(['stop', '--doc', doc], root); } catch { /* already gone */ }
-  const lock = path.join(root, 'specs', '.editor', '0099-mini', 'session.lock');
+  const lock = path.join(root, 'specs', '.editor', sessionSlugFor(doc), 'session.lock');
   for (let i = 0; i < 20 && fs.existsSync(lock); i++) await sleep(50);
   await sleep(250);
   try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ }

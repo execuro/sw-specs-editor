@@ -5,6 +5,51 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING — a session now edits one document, not a pair.** `start --doc <path>`
+  infers the mode from the filename (`…-spec.md` opens a tech-spec session,
+  anything else a PRD session) and the session knows exactly one editable
+  document. State moves from `specs/.editor/<slug>/` to
+  `specs/.editor/<slug>-prd/` or `<slug>-spec/`, so a PRD and its tech spec are
+  independent sessions — own chat log, queue, batch id space and port — and both
+  can run at once. The tab bar is gone; the header names the one document.
+
+  This is what the change is for. One chat log, one queue and one batch id space
+  used to cover both documents, and a batch carried `touched`, so a session
+  opened by `sw-design-requirements` could be handed a spec batch and dispatch
+  `sw-design-solution` out of it — a different document with different rules —
+  while both runs wrote into the same history.
+
+  The sibling is not lost: it is handed to the agent read-only as
+  `reference.path` in the batch, for context and reconciliation. The page is told
+  only that it exists and where, never its content.
+
+  Breaking in the same change: the batch JSON is flat (`doc`, `path`, `pathRel`,
+  `notes`, `chat`, `reference`), with `touched`, `docs.<doc>`, `chatDoc`,
+  `createSpec`, `paths` and `pathsRel` gone; `emit --doc` takes a document path
+  rather than `prd`/`spec` (the literal is still accepted and ignored, so a skill
+  pinned to an older CLI degrades instead of failing); `batch --kind spec` is
+  refused with the command that replaces it; `POST /api/status`, `/api/answer`
+  and `/api/diagram` answer **400** for a `doc` naming the other document instead
+  of silently coercing it to `prd`; and a diagram's SVG fallback now lives in its
+  own document's session folder.
+
+  An existing `specs/.editor/<slug>/` folder is not migrated. Its chat log
+  interleaves both documents and its `system` lines name neither, so a filtered
+  history would read as fact without being one — worse than none, because the
+  agent reads it as context. `start` closes any server still behind it, renames
+  it to `specs/.editor/<slug>.pre-split/` and says so in the new session's chat.
+  It is gitignored scratch; nothing is lost.
+
+### Removed
+
+- **`createSpec`** — the batch field, the page's *Create tech spec* button and the
+  dispatch case behind them. A PRD that reaches `Ready for specification` now
+  shows a banner naming `sw-design-solution <prd path> --editor`, which the user
+  runs themselves; `sw-design-solution --editor` given a PRD path resolves to the
+  spec path and creates it from its template when it does not exist yet.
+
 ### Added
 
 - **Clear cache** in the Agent panel head, and `POST /api/cache/clear` behind it. A

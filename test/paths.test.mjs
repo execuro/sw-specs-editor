@@ -101,10 +101,12 @@ test('outsideRoot refuses a document from another tree rather than opening a sec
   assert.match(outsideRoot('/a/b', '/other/specs/x.md'), /not inside the project root/);
 });
 
-test('settle leaves `emit --doc` alone, because there it names a side, not a file', () => {
-  const emitish = settle({ doc: 'spec', rootFlag: '' }, { docIsPath: false });
-  assert.equal(emitish.doc, 'spec', 'prd|spec must never be turned into a path');
-
+test('settle canonicalises `--doc` in every command, emit included', () => {
+  // `emit --doc` used to name a side of the PRD/spec pair, and settle had to
+  // leave it alone. A session edits one document and a feature has two live
+  // sessions, so the flag is the document path everywhere, and it identifies
+  // which session to talk to. (`emit` strips a legacy `prd`/`spec` literal
+  // before it gets here - see test/emit.test.mjs.)
   const { root } = gitHostRepo();
   try {
     const pathish = settle({ doc: 'specs/0099-mini.md', rootFlag: '' }, { cwd: root });
@@ -141,7 +143,7 @@ test('a command run from a subdirectory reaches the session started at the root'
 
     // The session directory is the one at the root, not a second one created
     // under the subdirectory.
-    assert.ok(fs.existsSync(path.join(root, 'specs', '.editor', '0099-mini')));
+    assert.ok(fs.existsSync(path.join(root, 'specs', '.editor', '0099-mini-prd')));
     assert.ok(!fs.existsSync(path.join(deep, 'specs')), 'no second session under the subdirectory');
   } finally {
     await teardown(root);
@@ -156,7 +158,7 @@ test('a batch polled from a subdirectory carries paths that open from there', as
     assert.equal(started.code, 0, started.out + started.err);
     await sleep(200);
 
-    const body = JSON.stringify({ docs: { prd: { notes: [{ kind: 'free', file: DOC, text: 'tighten FR-1' }] } } });
+    const body = JSON.stringify({ notes: [{ kind: 'free', file: DOC, text: 'tighten FR-1' }] });
     const queued = await run(['batch', '--kind', 'notes', '--doc', path.join(root, DOC), '-'], deep, body);
     assert.equal(queued.code, 0, queued.out + queued.err);
 
@@ -173,22 +175,25 @@ test('a batch polled from a subdirectory carries paths that open from there', as
     const batch = JSON.parse(fs.readFileSync(batchFile, 'utf8'));
     assert.equal(batch.root, root);
     assert.ok(path.isAbsolute(batch.context), 'context (chat.jsonl) must be absolute');
-    assert.ok(path.isAbsolute(batch.docs.prd.path), 'the document path must be absolute');
-    assert.ok(fs.existsSync(batch.docs.prd.path));
-    assert.ok(path.isAbsolute(batch.docs.prd.notes[0].file), 'a note locator must be absolute');
+    assert.ok(path.isAbsolute(batch.path), 'the document path must be absolute');
+    assert.ok(fs.existsSync(batch.path));
+    assert.ok(path.isAbsolute(batch.notes[0].file), 'a note locator must be absolute');
+    assert.ok(path.isAbsolute(batch.reference.path), 'the reference document must be absolute too');
+    assert.equal(batch.reference.readOnly, true);
 
     // ... and the display twins stay project-relative, so logs and fixtures
     // do not carry this machine's directory layout.
     assert.equal(batch.fileRel, path.relative(root, batchFile));
-    assert.equal(batch.docs.prd.pathRel, DOC);
-    assert.equal(batch.docs.prd.notes[0].fileRel, DOC);
+    assert.equal(batch.pathRel, DOC);
+    assert.equal(batch.notes[0].fileRel, DOC);
+    assert.equal(batch.reference.pathRel, 'specs/0099-mini-spec.md');
     assert.equal(field(got.out, 'batch_file_rel'), batch.fileRel);
 
     // The chat log is a human artefact: it keeps the relative form.
-    const chat = fs.readFileSync(path.join(root, 'specs', '.editor', '0099-mini', 'chat.jsonl'), 'utf8')
+    const chat = fs.readFileSync(path.join(root, 'specs', '.editor', '0099-mini-prd', 'chat.jsonl'), 'utf8')
       .split('\n').filter(Boolean).map(l => JSON.parse(l));
     const logged = chat.find(e => e.type === 'batch');
-    assert.equal(logged.docs.prd.notes[0].file, DOC, 'the chat log must not carry absolute paths');
+    assert.equal(logged.notes[0].file, DOC, 'the chat log must not carry absolute paths');
   } finally {
     await teardown(root);
   }

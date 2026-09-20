@@ -60,11 +60,12 @@ input:focus, textarea:focus { outline: none; border-color: var(--brand) !importa
 .switch:has(input:checked) { color: var(--brand-dark); }
 #header .brand .logo { width: 22px; height: 22px; border-radius: 5px; background: var(--brand); color: #fff; display: inline-grid; place-items: center; font-size: 12px; font-weight: 800; }
 .header-left { display: flex; align-items: center; }
-.tabs { display: flex; gap: 2px; height: 48px; }
-.tab { display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: none; border-bottom: 2px solid transparent; background: transparent; cursor: pointer; font-weight: 500; color: var(--muted); }
-.tab:hover:not(:disabled) { color: var(--ink); }
-.tab.active { color: var(--brand-dark); border-bottom-color: var(--brand); }
-.tab:disabled { color: var(--muted-2); cursor: default; }
+/* The header names the one document this session edits. It replaced a tab bar:
+   the other document is a separate session on its own port, not a tab here. */
+.doc-chip { display: flex; align-items: center; height: 48px; }
+.doc-chip-inner { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 6px; font-weight: 600; font-size: 13px; }
+.doc-chip-inner.prd { background: var(--brand-soft); color: var(--brand-dark); }
+.doc-chip-inner.spec { background: #ede9fe; color: #5b3fc4; }
 .header-right { display: flex; align-items: center; gap: 10px; font-size: 12.5px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted-2); display: inline-block; }
 .dot.ok { background: var(--ok); box-shadow: 0 0 0 3px rgba(31, 156, 63, .18); }
@@ -77,6 +78,9 @@ input:focus, textarea:focus { outline: none; border-color: var(--brand) !importa
 .banner { padding: 5px 16px; font-size: 12.5px; border-bottom: 1px solid var(--line); background: var(--warn-soft); color: var(--warn); }
 .banner.bad { background: var(--bad-soft); color: var(--bad); }
 .banner.info { background: var(--brand-soft); color: var(--brand-dark); }
+.banner.good { background: var(--ok-soft); color: var(--ok); }
+.banner .cmd { background: rgba(0, 0, 0, .06); border-radius: 4px; padding: 1px 6px; cursor: pointer; }
+.banner .cmd.copied { background: var(--ok); color: #fff; }
 
 /* layout */
 /* Full-width app shell: the document pane takes every remaining pixel and resizes with the window; the panel keeps a fixed width pinned to the right edge. Both scroll independently. */

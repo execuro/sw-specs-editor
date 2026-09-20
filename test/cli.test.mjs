@@ -14,7 +14,7 @@ import path from 'node:path';
 import { canBind, run, spawnCli, exec, field, hostRepo, teardown, PKG, sleep } from './helpers.mjs';
 
 const DOC = 'specs/0099-mini.md';
-const SESSION = 'specs/.editor/0099-mini';
+const SESSION = 'specs/.editor/0099-mini-prd';
 
 test('guide prints the protocol and the poll rules', async () => {
   const r = await run(['guide'], os.tmpdir());
@@ -64,7 +64,8 @@ test('diagram renders a graph to a scene and an SVG', async () => {
     assert.ok(scene.elements.some(e => e.id === 'n:order'));
 
     // --svg auto is the default and lands in the session folder.
-    assert.equal(field(r.out, 'svg'), path.join(SESSION, 'architecture.svg'));
+    // The spec's architecture diagram belongs to the spec session, not the PRD's.
+    assert.equal(field(r.out, 'svg'), path.join('specs', '.editor', '0099-mini-spec', 'architecture.svg'));
     assert.match(fs.readFileSync(path.join(root, field(r.out, 'svg')), 'utf8'), /^<svg /);
 
     // --svg none writes only the scene.
@@ -111,28 +112,31 @@ test('migrate converts a legacy question table without starting a server', async
   }
 });
 
-test('batch --kind selects the one flag that changes a batch, and rejects anything else', async t => {
+test('batch --kind takes notes and nothing else, and the body reaches the agent whole', async t => {
   if (!(await canBind())) return t.skip('cannot bind 127.0.0.1 in this environment');
   const root = hostRepo();
   try {
     await run(['start', '--doc', DOC], root);
-    const body = JSON.stringify({ docs: { prd: { notes: [{ id: 'FR-1', text: 'write the spec' }] } } });
+    const body = JSON.stringify({ notes: [{ id: 'FR-1', text: 'tighten this' }] });
 
-    // --kind spec is the only difference: it asks the agent to create the sibling.
-    const spec = await run(['batch', '--kind', 'spec', '--doc', DOC, '-'], root, body);
-    assert.equal(spec.code, 0, spec.err);
+    const queued = await run(['batch', '--kind', 'notes', '--doc', DOC, '-'], root, body);
+    assert.equal(queued.code, 0, queued.err);
     const got = await run(['poll', '--wait', '2', '--doc', DOC], root);
     assert.equal(field(got.out, 'event'), 'batch');
     const payload = JSON.parse(got.out.slice(got.out.indexOf('{')));
-    assert.equal(payload.createSpec, true);
-    assert.deepEqual(payload.touched, ['prd']);
-    assert.equal(payload.docs.prd.notes[0].id, 'FR-1', 'the body survives the flag');
+    assert.equal(payload.doc, 'prd');
+    assert.equal(payload.notes[0].id, 'FR-1', 'the body survives the flag');
+    // The envelope a caller could loop over to reach the other skill is gone.
+    assert.ok(!('createSpec' in payload) && !('touched' in payload) && !('docs' in payload));
 
-    // --kind notes is the default and leaves the flag off.
-    await run(['emit', 'done', 'done', '--batch', payload.id, '--doc', 'prd'], root);
-    await run(['batch', '--kind', 'notes', '--doc', DOC, '-'], root, body);
-    const plain = await run(['poll', '--wait', '2', '--doc', DOC], root);
-    assert.equal(JSON.parse(plain.out.slice(plain.out.indexOf('{'))).createSpec, false);
+    // `spec` used to set createSpec, asking this session to produce the sibling.
+    // The spec is its own session now, so the kind is refused with the command
+    // that replaces it rather than quietly ignored.
+    await run(['emit', 'done', 'done', '--batch', payload.id, '--doc', DOC], root);
+    const spec = await run(['batch', '--kind', 'spec', '--doc', DOC, '-'], root, body);
+    assert.equal(spec.code, 2);
+    assert.match(spec.err, /batch kind `spec` is gone/);
+    assert.match(spec.err, /start --doc <\.\.\.-spec\.md>/);
 
     // Anything else is a usage error, and nothing is queued.
     const bogus = await run(['batch', '--kind', 'analysis', '--doc', DOC, '-'], root, body);
@@ -199,7 +203,7 @@ test('start / status / reattach / poll / batch / stop', async t => {
     assert.match(idle.out, /run `sw-specs-editor poll` again/);
 
     // a queued batch comes back from the next poll
-    const body = JSON.stringify({ docs: { prd: { notes: [{ id: 'FR-1', text: 'tighten this' }] } }, chat: 'please look' });
+    const body = JSON.stringify({ notes: [{ id: 'FR-1', text: 'tighten this' }], chat: 'please look' });
     const queued = await run(['batch', '--kind', 'notes', '--doc', DOC, '-'], root, body);
     assert.equal(queued.code, 0);
     const id = field(queued.out, 'batch');
@@ -220,7 +224,7 @@ test('start / status / reattach / poll / batch / stop', async t => {
     assert.ok(got.out.indexOf('next_step:') < got.out.indexOf('"id"'), 'next_step must come before the payload');
 
     // emit reaches the chat log
-    const emit = await run(['emit', 'progress', 'doing the thing', '--batch', id, '--doc', 'prd'], root);
+    const emit = await run(['emit', 'progress', 'doing the thing', '--batch', id, '--doc', DOC], root);
     assert.equal(emit.code, 0);
     const chat = fs.readFileSync(path.join(root, SESSION, 'chat.jsonl'), 'utf8');
     assert.match(chat, /doing the thing/);
@@ -293,7 +297,7 @@ test('a killed poll redelivers the same batch', async t => {
   const root = hostRepo();
   try {
     await run(['start', '--doc', DOC], root);
-    const body = JSON.stringify({ docs: { prd: { notes: [{ id: 'FR-1', text: 'a note' }] } } });
+    const body = JSON.stringify({ notes: [{ id: 'FR-1', text: 'a note' }] });
     const queued = await run(['batch', '--kind', 'notes', '--doc', DOC, '-'], root, body);
     const id = field(queued.out, 'batch');
 
@@ -318,7 +322,7 @@ test('the batch queue survives a server restart', async t => {
   const root = hostRepo();
   try {
     await run(['start', '--doc', DOC], root);
-    const body = JSON.stringify({ docs: { prd: { notes: [{ id: 'FR-1', text: 'a note' }] } } });
+    const body = JSON.stringify({ notes: [{ id: 'FR-1', text: 'a note' }] });
     const id = field((await run(['batch', '--kind', 'notes', '--doc', DOC, '-'], root, body)).out, 'batch');
 
     await run(['stop', '--doc', DOC], root);
@@ -338,14 +342,14 @@ test('poll --reply posts the reply and waits again in one call', async t => {
   const root = hostRepo();
   try {
     await run(['start', '--doc', DOC], root);
-    const first = JSON.stringify({ docs: { prd: { notes: [{ id: 'FR-1', text: 'one' }] } } });
+    const first = JSON.stringify({ notes: [{ id: 'FR-1', text: 'one' }] });
     const id = field((await run(['batch', '--kind', 'notes', '--doc', DOC, '-'], root, first)).out, 'batch');
     await run(['poll', '--wait', '2', '--doc', DOC], root);
 
     // One command closes the finished batch and parks for the next one.
     const replying = run(['poll', '--wait', '2', '--reply', 'done with ' + id, '--doc', DOC], root);
     await sleep(300);
-    const second = JSON.stringify({ docs: { spec: { notes: [{ id: 'AC-2', text: 'two' }] } } });
+    const second = JSON.stringify({ notes: [{ id: 'FR-2', text: 'two' }] });
     await run(['batch', '--kind', 'notes', '--doc', DOC, '-'], root, second);
 
     const r = await replying;
