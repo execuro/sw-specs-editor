@@ -193,6 +193,8 @@ table.blk-table tr.row-blk.noted td:first-child { box-shadow: inset 2px 0 0 var(
 .agent-info .ai-pop { display: none; }
 .agent-info.open .ai-pop { display: grid; gap: 4px; position: absolute; right: 0; top: calc(100% + 5px); z-index: 30; width: min(440px, 68vw); padding: 7px 9px; background: var(--surface); border: 1px solid var(--line-soft); border-radius: var(--r); box-shadow: 0 6px 18px rgba(0,0,0,.13); text-align: left; white-space: normal; cursor: default; }
 .q-meta .agent-info { margin-left: 2px; }
+/* The meta-row icon sits at the pane's left edge, so its popover grows rightwards; the option-row ones keep the right anchor. */
+.q-meta .agent-info.open .ai-pop { right: auto; left: 0; }
 .question .agent-note i { font-style: normal; color: var(--muted); font-size: 11px; text-transform: lowercase; }
 .question .agent-note { font-size: 12px; color: var(--muted); border-left: 2px solid var(--brand-line); padding: 1px 0 1px 8px; }
 .question .agent-note b { color: var(--brand-dark); font-weight: 600; font-family: var(--mono); font-size: 11px; margin-right: 4px; }

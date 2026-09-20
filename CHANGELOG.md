@@ -112,6 +112,13 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - Sending a batch now clears the stored unsent notes, so a page reload (or a
   second tab) no longer resurrects items that were already sent.
 
+- A question's agent-note popover no longer runs off the left edge of the
+  document pane. The icon in front of a question's title sits at the pane's left
+  edge, while the popover was anchored to grow leftwards from it, and the pane
+  clips horizontally — so the note was cut off rather than merely scrolled away.
+  It now opens rightwards there, and any popover wider than the pane, or pushed
+  past either edge, is shifted and narrowed back inside it.
+
 ### Added
 
 - `sw-specs-editor uninstall-skill [--target <dir>] [--root <path>]` — removes

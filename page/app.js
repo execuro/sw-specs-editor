@@ -14,6 +14,7 @@
     annotate: false, openNotes: new Set(), ownPending: new Set(), ownFocus: null, queuedOpen: true,
   };
   const ANNOTATE_KEY = 'specs-editor:annotate';
+  const RUN_TIP = 'Reconciling the document with its sub-agents\u2019 consensus - this usually takes 7-10 minutes.';
   const $ = (sel, el = document) => el.querySelector(sel);
   const el = (tag, attrs = {}, ...children) => {
     const n = document.createElement(tag);
@@ -233,6 +234,23 @@
     // anchor scrolled out of the document pane → tuck the popover to the pane edge but keep it visible
     p.classList.toggle('detached', r.bottom < docR.top || r.top > docR.bottom);
   }
+  /**
+   * Agent-note popovers are absolutely positioned against their own icon, and the
+   * document pane clips horizontally - a popover that overflows it is lost, not
+   * scrollable. Shift any that would fall outside the pane back inside it.
+   */
+  function clampAgentPops() {
+    const host = $('#doc'); if (!host) return;
+    const paneR = host.getBoundingClientRect();
+    const left = paneR.left + 8, right = paneR.right - 8;
+    for (const p of document.querySelectorAll('.agent-info.open .ai-pop')) {
+      p.style.transform = '';                                  // measure unshifted
+      p.style.maxWidth = Math.max(180, right - left) + 'px';
+      const r = p.getBoundingClientRect();
+      const dx = r.left < left ? left - r.left : r.right > right ? right - r.right : 0;
+      if (dx) p.style.transform = `translateX(${Math.round(dx)}px)`;
+    }
+  }
   function savePopover() {
     const p = popEl();
     const text = p.querySelector('textarea').value.trim();
@@ -254,7 +272,7 @@
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeNoteEditors(); }
     });
     $('#doc').addEventListener('scroll', positionPopover, { passive: true });
-    window.addEventListener('resize', positionPopover);
+    window.addEventListener('resize', () => { positionPopover(); clampAgentPops(); });
     document.addEventListener('mousedown', (e) => {
       if (!pop.open || p.contains(e.target)) return;
       if (S.annotate && e.target.closest('#doc [data-id]')) return; // another block: mouseup re-opens on it
@@ -381,6 +399,7 @@
         e.preventDefault(); e.stopPropagation();
         if (S.openNotes.has(key)) S.openNotes.delete(key); else S.openNotes.add(key);
         wrap.classList.toggle('open', S.openNotes.has(key));
+        clampAgentPops();
       },
     }, 'i');
     const pop = el('span', { class: 'ai-pop', onclick: (e) => { e.preventDefault(); e.stopPropagation(); } });
@@ -590,7 +609,7 @@
     host.append(det);
     markNoted();
     host.scrollTop = scrollY; window.scrollTo(0, scrollY);
-    positionPopover();
+    positionPopover(); clampAgentPops();
   }
 
   /**
@@ -633,7 +652,6 @@
   function renderChip() {
     const host = $('#doc-chip'); host.innerHTML = '';
     const chip = el('div', { class: 'doc-chip-inner ' + S.doc, title: S.path }, docLabel());
-    if (S.lock) chip.append(el('span', { class: 'badge medium' }, 'agent working'));
     host.append(chip);
     document.title = `${docLabel()} · Specs Editor`;
   }
@@ -642,7 +660,7 @@
     if (S.closed) host.append(el('div', { class: 'banner bad' }, 'Session ended. Re-run the skill to open it again.'));
     else if (S.serverGone) host.append(el('div', { class: 'banner bad' }, 'Server unreachable - the session may have ended (heartbeat timeout or stop).'));
     if (S.lock) host.append(el('div', { class: 'banner info' }, `Agent working on ${docLabel()} - diagram saves and status updates are queued until the run ends.`));
-    host.append(readyBanner());
+    const ready = readyBanner(); if (ready) host.append(ready);
     // Only while no run is open: during a run the header already says "agent working",
     // and a disconnect banner next to it would contradict it. A run that has genuinely
     // lost its agent is recoverable through the Abort control below instead.
@@ -691,6 +709,7 @@
   function renderChat() {
     const host = $('#chat'); host.innerHTML = '';
     const progress = new Map(); // batch -> lines
+    let liveFor = null;         // batch whose live working bubble is already drawn
     const entries = S.chat;
     for (let i = 0; i < entries.length; i++) {
       const e = entries[i];
@@ -700,7 +719,7 @@
         progress.get(k).push(e.text);
         // live bubble only if no reply yet for that batch after this point
         const later = entries.slice(i + 1).some(x => (x.type === 'reply' && x.batch === e.batch) || x.type === 'progress' && (x.batch || '_') === k);
-        if (!later) host.append(progressBubble(progress.get(k), true));
+        if (!later) { host.append(progressBubble(progress.get(k), true)); liveFor = k; }
         continue;
       }
       if (e.type === 'batch') host.append(batchBubble(e));
@@ -708,11 +727,17 @@
       else if (e.type === 'system') host.append(el('div', { class: 'msg system' }, e.text));
       else if (e.type === 'divider') host.append(el('div', { class: 'msg divider' }, e.text));
     }
+    // A run that has not reported a step yet leaves no progress entry to draw
+    // from, so without this the chat stays silent between dispatch and the
+    // agent's first emit - which for a design run is minutes.
+    if (S.run && liveFor !== S.run.id) host.append(progressBubble(['picked up your message'], true));
     host.scrollTop = host.scrollHeight;
   }
   function progressBubble(lines, live) {
     const body = el('div', { class: 'm-body progress' }, ...lines.map((l, i) => el('div', { class: 'line' + (live && i === lines.length - 1 ? ' last' : '') }, l)));
-    return el('div', { class: 'msg agent' }, el('div', { class: 'm-head' }, 'agent · working'), body);
+    // Same pulsing dot as the header's status, so "working" reads the same in both places.
+    const head = el('div', { class: 'm-head', title: RUN_TIP }, 'agent · working', el('span', { class: 'dot busy' }));
+    return el('div', { class: 'msg agent' }, head, body);
   }
   function batchBubble(e) {
     const m = el('div', { class: 'msg user' }, el('div', { class: 'm-head' }, 'you', e.queued ? el('span', { class: 'badge' }, 'queued') : null));
@@ -749,7 +774,7 @@
       S.model = d.model;
       for (const id of [...(d.changed || []), ...(d.added || [])]) S.changed.add(id);
       rebindNotes(); renderQueued();
-      renderDoc(); renderChip(); renderBanners();
+      renderDoc(); renderBanners();
     });
     es.addEventListener('chat', (ev) => { S.chat.push(JSON.parse(ev.data)); renderChat(); });
     es.addEventListener('progress', () => { /* chat event carries it too */ });
@@ -757,7 +782,7 @@
       const r = JSON.parse(ev.data);
       if ('lock' in r) S.lock = r.lock; S.queue = r.queue || [];
       S.run = r.active ? { id: r.active, silent: Boolean(r.silent) } : null;
-      renderChip(); renderBanners(); renderDoc();
+      renderBanners(); renderDoc(); renderChat();
     });
     es.addEventListener('agent', (ev) => { const a = JSON.parse(ev.data); S.agent.present = a.present; S.agent.everPolled = a.everPolled || S.agent.everPolled; renderBanners(); });
     es.addEventListener('queued', (ev) => { S.queuedWrites = JSON.parse(ev.data).count; renderBanners(); });
