@@ -165,7 +165,7 @@ No telemetry, no self-update, no third-party hosting, and no binding beyond
 | `GET /`, `GET /page/*`, `GET /file?path=specs/…` | page, assets, files under `specs/` |
 | `GET /api/session` | session info (the lock, agent liveness), this document's model, the sibling's existence and path, unsent notes, chat history |
 | `GET /api/events` | SSE: `hello`, `doc` (model + changed ids), `chat`, `progress`, `run`, `agent`, `queued`, `notes`, `diagram`, `closing` |
-| `POST /api/heartbeat` | tab liveness (5 s); 60 s without any → server exits |
+| `POST /api/heartbeat` | tab liveness (5 s); 60 s without any → server exits. The clock starts at the first beat, so a page you have not opened yet has 10 minutes, not one |
 | `POST /api/notes` | autosave unsent notes |
 | `POST /api/batch` | `{notes, chat}` → queued for the agent. The batch it writes carries `doc`, `path`/`pathRel`, `notes`, `chat` and a read-only `reference` to the sibling. Batches are the only trigger for agent work; nothing runs on open |
 | `POST /api/status` | `{id, status}` → rewrites the tag on that line; `202` + queued while the document is locked. A `doc` naming the other document is `400`, never coerced onto this one |

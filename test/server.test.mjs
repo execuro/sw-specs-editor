@@ -292,6 +292,46 @@ test('an external edit reloads the document and reports what changed', { skip },
   assert.match(ev.data.model.blocks.find(b => b.id === 's5').children.find(b => b.id === 'FR-3').md, /in bold/);
 });
 
+/** Boot a server with NO page attached - not even the SSE handshake, which beats. */
+async function bootUnopened(t, overrides = {}) {
+  const root = hostRepo();
+  const { session, realExit } = await startFixtureServer(root, overrides);
+  t.after(() => cleanup({ session, realExit, root }));
+  return session;
+}
+
+test('a session nobody has opened yet waits out the long grace, not --grace', { skip }, async t => {
+  // `--grace` answers "the tab that was here has gone away". Before anyone has
+  // arrived it is the wrong question, so the first connection is what starts it.
+  const session = await bootUnopened(t, { grace: 1 });
+  assert.equal(session.everBeat, false);
+
+  session.lastBeat = Date.now() - 5_000;
+  session.tick();
+  assert.equal(session.closing, undefined, 'five seconds is well past --grace 1, and means nothing yet');
+
+  session.lastBeat = Date.now() - 601_000;
+  session.tick();
+  assert.equal(session.closing, true, 'the long window is bounded: an abandoned URL still lets go');
+});
+
+test('the first connection hands the clock back to --grace', { skip }, async t => {
+  const session = await bootUnopened(t, { grace: 1 });
+  session.beat();
+  assert.equal(session.everBeat, true);
+
+  session.lastBeat = Date.now() - 5_000;
+  session.tick();
+  assert.equal(session.closing, true, 'once a tab has been seen, losing it closes the session on --grace');
+});
+
+test('an explicit --grace longer than the open window is never shortened', { skip }, async t => {
+  const session = await bootUnopened(t, { grace: 900 });
+  session.lastBeat = Date.now() - 601_000;
+  session.tick();
+  assert.equal(session.closing, undefined);
+});
+
 test('losing the heartbeat closes the session; agent silence only warns', { skip }, async t => {
   const { root, session } = await boot(t, { grace: 1, agentTimeout: 1 });
   const lockFile = path.join(root, SESSION, 'session.lock');

@@ -17,6 +17,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ### Fixed
 
+- **A session you have not opened yet waits ten minutes, not one.** The heartbeat
+  clock started when the server booted, so the 60 s `--grace` window was already
+  running before anyone had the URL: reach the browser a minute late and the
+  session was gone. That number answers "the tab that was here has gone away",
+  which is not the same question as "nobody has arrived yet". Until the first
+  heartbeat ever arrives the grace is at least 600 s; from that beat on `--grace`
+  applies exactly as before, and an explicit `--grace` longer than 600 s is never
+  shortened by it.
+
 - **A run can no longer drop a question's advice unnoticed.** The pre-run snapshot now
   records each question's `(recommended)` mark and its agent-note lines, and the repair
   pass puts back whatever the run lost, reporting it in the chat like any other repair.
