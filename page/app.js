@@ -420,6 +420,9 @@
     // Meta row (id · kind · blocks) above the full-width question text so long questions never get squeezed.
     const meta = el('div', { class: 'q-meta' }, el('span', { class: 'id' }, q.id));
     if (q.kindTag) meta.append(el('span', { class: 'badge' }, q.kindTag === 'adr' ? 'ADR decision' : 'readiness gate'));
+    // An option with no notes looks exactly like one whose notes were lost, so the
+    // question says it plainly: no agent has put a recommendation on this yet.
+    if ((S.model?.meta?.unadvised || []).includes(q.id)) meta.append(el('span', { class: 'badge pending', title: 'No agent recommendation on this question yet' }, 'advice pending'));
     if (q.blocks.length) meta.append(el('span', { class: 'q-blocks' }, el('span', { class: 'lbl' }, 'blocks'), ...q.blocks.map(b => el('a', { href: '#' + b, dataset: { goto: b } }, b))));
     const cm = changedMark(q.id); if (cm) meta.append(cm);
     const text = el('div', { class: 'q-text' }); text.innerHTML = linkifyIds(mdInline(q.question));

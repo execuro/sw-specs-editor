@@ -93,6 +93,9 @@ test('a batch locks the session document, and a page write queues while locked',
   assert.equal(queued.body.queued, false, 'no run is active, so it is not waiting behind one');
   await sse.wait(e => e.event === 'run' && e.data.state === 'queued');
   assert.ok(fs.existsSync(path.join(session.root, SESSION, 'batches', 'b-1.json')));
+  const written = JSON.parse(fs.readFileSync(path.join(session.root, SESSION, 'batches', 'b-1.json'), 'utf8'));
+  assert.deepEqual(written.questions, { open: 2, unadvised: ['Q-2'] },
+    'the batch tells the agent which questions still carry no recommendation');
 
   // The agent picks it up: that is what starts the run and takes the lock.
   const next = await j(url + 'api/next?wait=1');

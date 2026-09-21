@@ -86,6 +86,33 @@ test('a **Q-n** block yields its tag, Blocks line, options and per-option agent 
   assert.deepEqual(findBlock(prd, 'Q-2').answer, { option: 'A' });
 });
 
+test('a question counts as advised only when an agent put a recommendation on it', () => {
+  const q1 = findBlock(prd, 'Q-1');
+  assert.equal(q1.advised, true, 'Q-1 has a (recommended) option and notes behind it');
+  assert.equal(q1.userRaised, false);
+  assert.equal(findBlock(prd, 'Q-2').advised, false, 'options and a tick are not advice');
+  assert.deepEqual(prd.meta.unadvised, ['Q-2'], 'meta names what an advising run still owes');
+
+  // Losing the notes is a change, not a no-op: it has to move the hash, or the
+  // diff and the repair pass both look straight past it.
+  const stripped = parse(prdText.replace(/^ {2}- \[(?:pm|architect)\].*\n/gm, ''), { path: PRD_PATH });
+  const q1Stripped = findBlock(stripped, 'Q-1');
+  assert.equal(q1Stripped.advised, false);
+  assert.notEqual(q1Stripped.hash, q1.hash, 'the notes are part of the question hash');
+  assert.deepEqual(stripped.meta.unadvised, ['Q-1', 'Q-2']);
+
+  // The one exemption: a question the user raised themselves.
+  const own = parse([
+    '# T', '', '## 11. Open Questions', '',
+    '**Q-9** Does the label show on an empty cart?',
+    '  - [user] raised on the page — advice not requested',
+    '- [ ] A: No',
+    '- [ ] B: Yes',
+  ].join('\n'), { path: PRD_PATH });
+  assert.equal(findBlock(own, 'Q-9').userRaised, true);
+  assert.deepEqual(own.meta.unadvised, [], "the user's own question is nobody's advice debt");
+});
+
 test('a Diagram: line becomes a diagram block named after the file', () => {
   assert.deepEqual(prd.diagrams, ['diagram:domain']);
   const d = findBlock(prd, 'diagram:domain');

@@ -5,6 +5,30 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **The batch says which questions still carry no recommendation.** Every batch now
+  carries `questions: {open, unadvised}`. `unadvised` lists the question ids with no
+  `(recommended)` option backed by an agent note, minus the ones the user raised
+  themselves (`  - [user] …`). Until now the only questions an agent saw were the ones
+  the user happened to click, so a question born without advice stayed that way until
+  the user asked for it by hand. `status` prints the same as a `questions:` line, the
+  model carries it as `meta.unadvised`, and the page marks those cards **advice pending**.
+
+### Fixed
+
+- **A run can no longer drop a question's advice unnoticed.** The pre-run snapshot now
+  records each question's `(recommended)` mark and its agent-note lines, and the repair
+  pass puts back whatever the run lost, reporting it in the chat like any other repair.
+  The notes are also part of the question's hash, so losing them reads as a change
+  instead of the no-op it used to be for the diff and the page's highlighting.
+- **Ticking the ✎ own answer no longer re-attributes agent notes.** The `- [x] ✎ …`
+  line was inserted straight after the last option, i.e. between that option and its
+  indented notes; on the next parse those notes lost their option and the page showed
+  them on the recommended one instead. It now goes below the notes.
+- **The legacy question-table conversion keeps each note's stance.** `[pm] Recommends A:
+  …` used to come out as `[pm] …`, losing the verb the page italicises.
+
 ## [0.1.2] - 2026-09-20
 
 ### Changed

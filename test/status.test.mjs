@@ -110,6 +110,52 @@ test('verifyAndRepair restores a status tag and a Diagram line an agent dropped'
   assert.deepEqual(verifyAndRepair(dropped, snap, PRD_OPTS).repairs.filter(x => x.includes('FR-1')), []);
 });
 
+test('verifyAndRepair puts back the advice a run dropped from a question', () => {
+  const snap = snapshot(prdText, PRD_OPTS);
+
+  // The run rewrote the section and lost both the mark and the notes behind it.
+  const stripped = prdText.replace(/^ {2}- \[(?:pm|architect)\].*\n/gm, '').replace(' (recommended)', '');
+  assert.equal(findBlock(parse(stripped, PRD_OPTS), 'Q-1').advised, false);
+
+  const r = verifyAndRepair(stripped, snap, PRD_OPTS);
+  assert.deepEqual(r.repairs, ['restored (recommended) and 2 agent notes on Q-1']);
+  const q1 = findBlock(parse(r.text, PRD_OPTS), 'Q-1');
+  assert.equal(q1.advised, true);
+  assert.equal(q1.options.find(o => o.recommended).id, 'A');
+  assert.deepEqual(q1.agentNotes.map(n => [n.agent, n.options]), [['pm', ['A']], ['architect', ['A']]],
+    'each note lands back under the option it judges');
+
+  // Idempotent, and a question the run answered away is not resurrected.
+  assert.deepEqual(verifyAndRepair(r.text, snap, PRD_OPTS).repairs, []);
+  const removed = prdText.replace(/\*\*Q-1\*\*[\s\S]*?\n\n/, '');
+  assert.deepEqual(verifyAndRepair(removed, snap, PRD_OPTS).repairs.filter(x => x.includes('Q-1')), []);
+});
+
+test('the own-answer line goes below an option and its notes, never between them', () => {
+  const doc = [
+    '# T', '', '## 11. Open Questions', '',
+    '**Q-5** Which source?',
+    '- [ ] A: One (recommended)',
+    '  - [pm] cheapest',
+    '- [ ] B: Two',
+    '  - [pm] costs a second lookup',
+    '',
+  ].join('\n');
+  const r = setAnswer(doc, 'Q-5', { text: 'neither' }, PRD_OPTS);
+  assert.equal(r.changed, true);
+  const q5 = findBlock(parse(r.text, PRD_OPTS), 'Q-5');
+  assert.deepEqual(q5.answer, { text: 'neither' });
+  assert.deepEqual(q5.agentNotes.map(n => n.options), [['A'], ['B']],
+    "the last option's notes stay its own instead of drifting onto the recommended one");
+});
+
+test('the legacy conversion keeps the stance of every note', () => {
+  const converted = questionTableToList(specText, SPEC_OPTS).text;
+  assert.match(converted, /^ {2}- \[pm\] Recommends A: matches how tax is already resolved$/m);
+  assert.equal(findBlock(parse(converted, SPEC_OPTS), 'Q-1').agentNotes[0].stance, 'recommends',
+    'the recommends/against verb survives the round trip');
+});
+
 test('questionTableToList converts a legacy table and is idempotent', () => {
   const before = parse(specText, SPEC_OPTS);
   assert.ok(collect(before.blocks).some(b => b.kind === 'table' && b.tableKind === 'questions'));
