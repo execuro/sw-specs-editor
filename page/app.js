@@ -368,7 +368,9 @@
       const parts = el('div', { class: 'parts' });
       for (const p of block.parts) {
         const pb = el('div', { class: 'md' }); pb.innerHTML = linkifyIds(md(p.md || ''));
-        parts.append(blk(p, 'part', el('div', { class: 'item-head' }, el('span', { class: 'part-label' }, p.label), pb, statusToggle(p), changedMark(p.id))));
+        // The label is a sub-header over its content, not a left column: a TDD plan or a
+        // list of test files needs the full width, and reads top-to-bottom.
+        parts.append(blk(p, 'part', el('div', { class: 'part-head' }, el('span', { class: 'part-label' }, p.label), statusToggle(p), changedMark(p.id)), pb));
       }
       node.append(parts);
     }

@@ -129,7 +129,9 @@ body.annotating #doc .blk:hover a, body.annotating #doc .blk:hover button, body.
 .item .item-body { flex: 1; min-width: 0; }
 .item .item-body > :last-child { margin-bottom: 0; }
 .item .parts { margin: 4px 0 0 6px; padding-left: 10px; border-left: 2px solid var(--line-soft); }
-.part-label { font-weight: 600; font-size: 11.5px; color: var(--muted); margin-right: 6px; padding-top: 3px; min-width: 40px; }
+.item .part-head { display: flex; align-items: center; gap: 2px; margin-bottom: 2px; }
+.item .part-head .status { margin-top: 0; }
+.part-label { font-weight: 600; font-size: 11.5px; color: var(--muted); }
 table.blk-table tr.row-blk { position: relative; }
 table.blk-table tr.row-blk:hover td { background: var(--surface); }
 table.blk-table tr.row-blk.changed td { background: #fff8ec; }
@@ -186,8 +188,8 @@ table.blk-table tr.row-blk.noted td:first-child { box-shadow: inset 2px 0 0 var(
 .question .option .opt-text { min-width: 0; }
 .question .option .opt-text p { margin: 0; }
 .question .option .rec { font-size: 10.5px; font-weight: 600; color: var(--ok); background: var(--ok-soft); border-radius: 8px; padding: 2px 7px; white-space: nowrap; margin-top: 1px; }
-.question .decision { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 0; }
-.question .decision .option { flex: 1; grid-template-columns: 16px 16px minmax(0, 1fr) auto auto; font-weight: 500; }
+.question .decision { display: grid; gap: 4px; margin: 8px 0 0; }
+.question .decision .option { font-weight: 500; }
 .agent-info { position: relative; display: inline-flex; align-items: center; }
 .agent-info .ai-btn { width: 16px; height: 16px; padding: 0; border: 1px solid var(--brand-line); border-radius: 50%; background: var(--surface); color: var(--brand-dark); font-family: var(--mono); font-size: 11px; font-weight: 700; line-height: 1; cursor: pointer; }
 .agent-info .ai-btn:hover, .agent-info.open .ai-btn { background: var(--brand-line); }
@@ -204,7 +206,6 @@ table.blk-table tr.row-blk.noted td:first-child { box-shadow: inset 2px 0 0 var(
 .question .option.own .own-input:focus { border-color: var(--brand); outline: none; }
 .question .option.own .own-input::placeholder { color: var(--muted-2); }
 .question .option.own .btn { padding: 2px 8px; }
-.question .decision .option.own { flex-basis: 100%; }
 .question .answered { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 500; color: var(--ok); margin-top: 6px; }
 
 /* diagrams */

@@ -15,6 +15,23 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   the user asked for it by hand. `status` prints the same as a `questions:` line, the
   model carries it as `meta.unadvised`, and the page marks those cards **advice pending**.
 
+### Changed
+
+- **An ADR or readiness question lists its options one per row.** `[adr]` and `[gate]`
+  questions laid their options out side by side, so two short ones sat in half-width
+  boxes and a third wrapped onto a ragged second row - a different shape from every
+  other question on the page, for no reason beyond the options usually being short.
+  They now use the same single-column list as the rest; only the slightly heavier
+  option text still marks them out.
+
+- **A spec AC's parts read top-to-bottom instead of in two columns.** `Depends on`,
+  `Decision`, `Implementation plan (TDD order)` and `Tests` put the label in a narrow
+  left column and the content in a right one, which suits `Depends on: none` and
+  nothing else: a numbered TDD plan or a list of test files was squeezed into the
+  remaining width. The label is now a sub-header on its own line with its content
+  full-width below it. Presentation only - the model, block ids, status tags and note
+  anchoring are unchanged.
+
 ### Fixed
 
 - **A session you have not opened yet waits ten minutes, not one.** The heartbeat
