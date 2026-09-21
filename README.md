@@ -24,7 +24,7 @@ Nothing to install for the CLI - it runs through `npx`. What a host installs is
 the **skill**, which teaches an agent to drive it:
 
 ```sh
-npx -y @execuro-sw-ecosystem/sw-specs-editor@0.1.2 install-skill
+npx -y @execuro-sw-ecosystem/sw-specs-editor@0.1.3 install-skill
 ```
 
 That writes one file, `sw-specs-editor/SKILL.md`, into your agent's skills
@@ -38,7 +38,7 @@ not deleted, and the command tells you where it is. Both commands take the same
 `--target <dir>`, so they always act on the same file.
 
 ```sh
-npx -y @execuro-sw-ecosystem/sw-specs-editor@0.1.2 uninstall-skill
+npx -y @execuro-sw-ecosystem/sw-specs-editor@0.1.3 uninstall-skill
 ```
 
 If you use the Shopware Ecosystem Agentic Harness, its `sw-setup` skill offers
@@ -59,7 +59,7 @@ or drive the CLI directly. `guide` is the session protocol and the single source
 of truth for it - an agent should read that, not this file:
 
 ```
-npx -y @execuro-sw-ecosystem/sw-specs-editor@0.1.2 guide
+npx -y @execuro-sw-ecosystem/sw-specs-editor@0.1.3 guide
 ```
 
 ## Commands
