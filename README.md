@@ -68,7 +68,8 @@ npx -y @execuro-sw-ecosystem/sw-specs-editor@0.1.3 guide
 sw-specs-editor guide                            # the session protocol - read it first
 sw-specs-editor start   --doc specs/0007-x.md    # the filename picks the mode: -spec.md => spec session, else PRD
                                                  # prints SPECS_EDITOR_URL=…, detaches; reattaches if already running
-sw-specs-editor status  --doc specs/0007-x.md    # live session summary; --json for the full payload
+sw-specs-editor status  --doc specs/0007-x.md    # live session summary, with a phase: line (also with no server running); --json for the full payload
+sw-specs-editor overview [--json] [--root <path>] # every feature with its three phases and the next command; read-only
 sw-specs-editor poll    --doc specs/0007-x.md    # waits up to 90 s -> batch | idle | closed
 sw-specs-editor stop    --doc specs/0007-x.md    # only that document's session
 sw-specs-editor migrate --doc specs/0007-x.md    # converts a legacy question table to blocks, no server started
@@ -94,7 +95,32 @@ Exit codes: 0 success, 1 server unreachable, 2 usage error.
 | Diagrams | Excalidraw canvas per linked diagram. Edits save to the `.excalidraw` file; **Ask agent to regenerate** rebuilds it from the graph file |
 | Status labels | `open` / `partly` / `done` on FRs and ACs are read-only here; the implementing and verifying skills set them |
 | Abort run | Appears beside the run banner when the agent has gone quiet mid-run. Ends the run, unlocks the document and applies everything queued behind it. Edits already written stay |
+| Phase band | Under the header, in PRD and spec sessions: Design requirements, Design solution, Implement, with "Phase N of 3" on the left. Done phases are green, the current one blue, later ones grey. Phases 1 and 2 show the document's confidence as a percentage while current; phase 3 shows only "Next" or "Started" |
 | Ready | A PRD at `Ready for specification` shows a banner naming `sw-design-solution specs/NNNN-slug-spec.md --editor`. A statement, not a button — you start that session yourself, and this one stays open |
+| Ready to implement | A spec at `Ready for implementation`, with implementation not started, shows a green banner with a copyable `sw-implement-feature specs/NNNN-slug-spec.md`. Run it in your agent; this session stays open |
+
+### The three phases
+
+A phase is complete when the design skill wrote its ready status into the document (`ready for specification` for the PRD, `ready for implementation` for the spec). The editor reads that string and does not recompute the confidence threshold. A phase after an incomplete one is not started, so exactly one phase is current.
+
+Implementation is not monitored. Phase 3 is "Started" once at least one AC of the spec carries `[done]` or `[partly]`, or `specs/NNNN-slug-verification.md` exists. Until then it is "Next".
+
+The next command for phase 2 is the PRD path while the spec does not exist yet, and the spec path once it exists. A spec without a PRD shows "PRD missing" and no command.
+
+`status` prints the same answer as a line, for example `phase: 2 of 3 Design solution 60%`, and `overview` lists it for every feature:
+
+```
+sw-specs-editor overview
+features: 3
+next_step: run sw-design-requirements specs/0001-cart-upsell-widget.md
+feature                       phase 1 requirements  phase 2 solution   phase 3 implement  next command
+----------------------------  --------------------  -----------------  -----------------  ---------------------------------------------------------------
+0001 cart-upsell-widget       [#######---] 70%      n/a                n/a                sw-design-requirements specs/0001-cart-upsell-widget.md
+0002 click-and-collect        [----------] 0%       n/a                n/a                sw-design-requirements specs/0002-click-and-collect.md
+0003 storage-location-string  [#########-] 94%      [##########] 100%  next               sw-implement-feature specs/0003-storage-location-string-spec.md
+```
+
+It scans `specs/` for `NNNN-*.md`, ignores `-adr-*` and `-verification.md` files, and writes nothing. `--json` prints the rows as JSON after the same `key: value` lines. A file that cannot be read becomes an `unreadable` row and does not fail the command.
 
 ### What happens when you send
 

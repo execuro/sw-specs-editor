@@ -5,6 +5,21 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+
+- **A phase band in every session.** Under the header the page shows the three phases
+  of the process (Design requirements, Design solution, Implement) with "Phase N of 3"
+  and the confidence percentage on the current phase. A phase is complete when the
+  design skill wrote its ready status; implementation is only "Next" or "Started"
+  (an AC tagged `[done]` or `[partly]`, or a `-verification.md` file).
+- **A hand-off banner for a ready spec.** A spec at `Ready for implementation` with
+  implementation not started shows a green banner with a copyable
+  `sw-implement-feature <spec path>`.
+- **`status` prints a `phase:` line**, also when no server is running.
+- **`sw-specs-editor overview [--json] [--root <path>]`** lists every feature in
+  `specs/` with its three phases and the next command. Read-only; ADR and
+  verification files are ignored; an unreadable file becomes a row, not a failure.
+
 ## [0.1.3] - 2026-09-21
 
 ### Added

@@ -51,6 +51,8 @@ The design skill runs its editor mode: it reconciles only what the notes touch, 
 
 **The hand-off.** When a PRD reaches `Ready for specification` the page says so and names the command. Do not start the spec session yourself and do not offer to: the user runs `sw-design-solution <prd path> --editor`, which opens its own session on its own port with its own chat and queue.
 
+When a spec reaches `Ready for implementation` the page shows a banner naming `sw-implement-feature <spec path>`. Say so in one line and do not run it yourself.
+
 Nothing goes to the terminal during a batch beyond what the tools print — the user is reading the page.
 
 ## Notes
