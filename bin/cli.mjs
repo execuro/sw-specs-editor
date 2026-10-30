@@ -25,6 +25,7 @@ const COMMANDS = {
   emit: () => import('../lib/emit.mjs'),
   batch: () => import('../lib/batch.mjs'),
   diagram: () => import('../lib/diagram.mjs'),
+  overview: () => import('../lib/overview.mjs'),
   guide: () => import('../lib/guide.mjs'),
   'install-skill': () => import('../lib/install-skill.mjs'),
   'uninstall-skill': () => import('../lib/uninstall-skill.mjs'),
@@ -40,6 +41,7 @@ const USAGE = `usage: sw-specs-editor <command> [options]
   batch    --kind notes [--doc <path>] - [--root <path>]
   diagram  <graph.json> <out.excalidraw> [--svg <path>|auto|none]
   migrate  --doc <path> [--root <path>]
+  overview [--json] [--root <path>]   every feature with its three phases and the next command
   guide    print the session protocol
   install-skill   [--target <dir>] [--print] [--force]   install this package's skill into a host
   uninstall-skill [--target <dir>]                      remove the skill this package installed

@@ -527,13 +527,51 @@
     return wrap;
   }
 
+  // ---------------------------------------------------------------- phases
+  /** The phase of the document this session edits: 1 for a PRD, 2 for a spec. */
+  function ownPhase() { return S.phases?.phases?.[S.doc === 'spec' ? 1 : 0] || null; }
+  /** Ready = the document's own phase is done. Without `phases` (older payload) the status string decides, as before. */
+  function isReady(status) {
+    const p = ownPhase();
+    return p ? p.state === 'done' : /ready/i.test(status || '');
+  }
+  /** Update the Status pill and the Readiness tile in place. Never touches the rest of the document. */
+  function refreshReady() {
+    const ready = isReady(S.model?.meta?.status);
+    for (const pill of document.querySelectorAll('#doc [data-status-pill]')) pill.className = 'pill ' + (ready ? 'ready' : 'progress');
+    for (const r of document.querySelectorAll('#doc [data-readiness]')) r.textContent = ready ? 'Ready for implementation' : 'In progress';
+  }
+  function renderPhases() {
+    const host = $('#phasebar'); host.innerHTML = '';
+    const ph = S.phases;
+    if (!ph || !Array.isArray(ph.phases) || !ph.phases.length) return;
+    const flow = el('div', { class: 'flow', role: 'list', 'aria-label': 'Process phases' });
+    ph.phases.forEach((p, i) => {
+      const pct = typeof p.percent === 'number' ? Math.max(0, Math.min(100, Math.round(p.percent))) : null;
+      const full = p.state === 'done' || p.state === 'started';
+      const fill = full ? 100 : p.state === 'current' && pct != null ? pct : 0;
+      const label = p.note ? p.note : p.state === 'done' ? 'Done' : p.state === 'started' ? 'Started' : p.state === 'next' ? 'Next'
+        : p.state === 'current' && pct != null ? pct + '%' : '';
+      const chev = el('div', { class: 'chev ' + (i === 0 ? 'first ' : '') + p.state, role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(fill), 'aria-valuetext': label ? `${p.name}: ${label}` : p.name, 'aria-label': p.name, title: p.name },
+        el('span', { class: 'num', 'aria-hidden': 'true' }, p.state === 'done' ? '\u2713' : String(p.n)),
+        el('span', { class: 'cn' }, p.name),
+        label ? el('span', { class: 'cp' }, el('b', {}, label)) : null);
+      chev.style.setProperty('--p', fill + '%');
+      if (p.n === ph.current) chev.setAttribute('aria-current', 'step');
+      flow.append(el('div', { role: 'listitem', style: 'display: contents' }, chev));
+    });
+    host.append(el('div', { class: 'phase-of' }, el('small', {}, 'Phase'), el('b', {}, `${ph.current} of ${ph.phases.length}`)), flow);
+  }
+  /** A phases update: the band, the banners and the Status pill only. renderDoc would destroy open diagram editors. */
+  function renderPhaseState() { renderPhases(); refreshReady(); renderBanners(); }
+
   // ---------------------------------------------------------------- overview
   function renderOverview(model) {
     const m = model.meta;
-    const ready = /ready/i.test(m.status || '');
+    const ready = isReady(m.status);
     const kpi = (k, v, small) => el('div', { class: 'kpi' }, el('div', { class: 'k' }, k), el('div', { class: 'v' + (small ? ' small' : '') }, v));
     const grid = el('div', { class: 'overview' });
-    grid.append(kpi('Status', el('span', { class: 'pill ' + (ready ? 'ready' : 'progress') }, m.status || 'unknown')));
+    grid.append(kpi('Status', el('span', { class: 'pill ' + (ready ? 'ready' : 'progress'), 'data-status-pill': '' }, m.status || 'unknown')));
     if (S.doc === 'prd') {
       grid.append(kpi('Confidence', m.confidence != null ? m.confidence + '%' : '—'));
       grid.append(kpi('Open questions', `${m.openQuestions}`));
@@ -544,7 +582,7 @@
       }
       grid.append(kpi('Requirements', `${m.requirements.done}/${m.requirements.total} done` + (m.requirements.partly ? ` · ${m.requirements.partly} partly` : '')));
     } else {
-      grid.append(kpi('Readiness', ready ? 'Ready for implementation' : 'In progress', true));
+      grid.append(kpi('Readiness', el('span', { 'data-readiness': '' }, ready ? 'Ready for implementation' : 'In progress'), true));
       grid.append(kpi('Confidence', m.confidence != null ? m.confidence + '%' : '—'));
       grid.append(kpi('Open ADRs', (m.openAdrs || []).length ? m.openAdrs.map(a => a.replace(/^specs\//, '')).join(', ') : 'none', true));
       grid.append(kpi('Open questions', `${m.openQuestions}`));
@@ -632,12 +670,33 @@
       ' in your agent. This PRD session stays open.');
   }
 
-  /** A command the user would otherwise retype. Copying it is not dispatching it. */
+  /** The spec's hand-off: implementation runs in the user's agent. Gone once phase 3 reports "started". */
+  function specBanner() {
+    const p3 = S.phases?.phases?.[2];
+    if (S.doc !== 'spec' || !p3 || p3.state !== 'next' || !S.phases.next) return null;
+    return el('div', { class: 'banner good' },
+      'Ready for implementation. Implementation runs in your agent, not here - run ',
+      copyableCommand(S.phases.next),
+      '. This spec session stays open.');
+  }
+
+  /**
+   * A command the user would otherwise retype, shown as the slash command it is
+   * (the design and implement steps are skills) with a visible Copy button.
+   * Copying it is not dispatching it.
+   */
   function copyableCommand(cmd) {
-    const code = el('code', { class: 'cmd', title: 'Click to copy', onclick: () => {
-      navigator.clipboard?.writeText(cmd).then(() => { code.classList.add('copied'); setTimeout(() => code.classList.remove('copied'), 1200); }).catch(() => {});
-    } }, cmd);
-    return code;
+    const text = cmd.startsWith('/') ? cmd : `/${cmd}`;
+    const code = el('code', { class: 'cmd', title: 'Click to copy' }, text);
+    const btn = el('button', { class: 'cmd-copy', type: 'button', title: 'Copy the command' }, 'Copy');
+    const copy = () => {
+      navigator.clipboard?.writeText(text).then(() => {
+        code.classList.add('copied'); btn.textContent = 'Copied';
+        setTimeout(() => { code.classList.remove('copied'); btn.textContent = 'Copy'; }, 1200);
+      }).catch(() => {});
+    };
+    code.onclick = copy; btn.onclick = copy;
+    return el('span', { class: 'cmd-wrap' }, code, ' ', btn);
   }
 
   function gotoBlock(id) {
@@ -665,7 +724,7 @@
     if (S.closed) host.append(el('div', { class: 'banner bad' }, 'Session ended. Re-run the skill to open it again.'));
     else if (S.serverGone) host.append(el('div', { class: 'banner bad' }, 'Server unreachable - the session may have ended (heartbeat timeout or stop).'));
     if (S.lock) host.append(el('div', { class: 'banner info' }, `Agent working on ${docLabel()} - diagram saves and status updates are queued until the run ends.`));
-    const ready = readyBanner(); if (ready) host.append(ready);
+    const ready = readyBanner() || specBanner(); if (ready) host.append(ready);
     // Only while no run is open: during a run the header already says "agent working",
     // and a disconnect banner next to it would contradict it. A run that has genuinely
     // lost its agent is recoverable through the Abort control below instead.
@@ -776,11 +835,12 @@
     es.addEventListener('hello', (ev) => { S.serverGone = false; applySession(JSON.parse(ev.data).session); renderBanners(); });
     es.addEventListener('doc', (ev) => {
       const d = JSON.parse(ev.data);
-      S.model = d.model;
+      S.model = d.model; if (d.phases) S.phases = d.phases;
       for (const id of [...(d.changed || []), ...(d.added || [])]) S.changed.add(id);
       rebindNotes(); renderQueued();
-      renderDoc(); renderBanners();
+      renderPhases(); renderDoc(); renderBanners();
     });
+    es.addEventListener('phases', (ev) => { const d = JSON.parse(ev.data); if (d.phases) { S.phases = d.phases; renderPhaseState(); } });
     es.addEventListener('chat', (ev) => { S.chat.push(JSON.parse(ev.data)); renderChat(); });
     es.addEventListener('progress', () => { /* chat event carries it too */ });
     es.addEventListener('run', (ev) => {
@@ -804,9 +864,9 @@
   async function load() {
     const j = await api('/api/session');
     applySession(j.session);
-    S.doc = j.doc; S.path = j.path; S.model = j.model; S.reference = j.reference || null;
+    S.doc = j.doc; S.path = j.path; S.model = j.model; S.reference = j.reference || null; S.phases = j.phases || null;
     S.notes = j.notes || []; S.chat = j.chat || [];
-    rebindNotes(); renderChip(); renderDoc(); renderQueued(); renderChat(); renderBanners();
+    rebindNotes(); renderChip(); renderPhases(); renderDoc(); renderQueued(); renderChat(); renderBanners();
   }
 
   function heartbeat() {
