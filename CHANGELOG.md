@@ -5,6 +5,17 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Changed
+
+- **Each batch runs in a fresh sub-agent.** The session loop now only polls and
+  dispatches: every batch goes to a new sub-agent that runs the design skill and
+  returns one line. The loop's context no longer grows with each batch (measured
+  +3.5k tokens per batch instead of +25k to 45k), so a long session costs less
+  and does not reach compaction.
+  The batch goes to the `sw-editor-batch` agent type when it is installed (it
+  ships with the agentic harness, a lean agent that starts from a smaller
+  context), otherwise to a general-purpose sub-agent.
+
 ## [0.1.3] - 2026-09-21
 
 ### Added
