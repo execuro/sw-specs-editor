@@ -5,6 +5,7 @@
   --brand: #189eff; --brand-dark: #0b539b; --brand-soft: #e5f5ff; --brand-line: #a9dbff;
   --ok: #1f9c3f; --ok-soft: #e6f8e9; --warn: #c76a00; --warn-soft: #fff3e0; --bad: #c8203f; --bad-soft: #fde8ec;
   --changed: #ffe4b3; --changed-ink: #7a4a00;
+  --phase-done: #bfe6c9; --phase-done-ink: #14692a; --phase-current: #8fd0ff;
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   --r: 6px; --r-lg: 8px;
   --main-min: 720px; --panel-w: clamp(360px, calc(24vw + 40px), 480px); --shell-min: calc(var(--main-min) + var(--panel-w) + 48px);
@@ -75,6 +76,29 @@ input:focus, textarea:focus { outline: none; border-color: var(--brand) !importa
 @keyframes pulse { 50% { box-shadow: 0 0 0 6px rgba(242, 183, 5, .08); } }
 #status-text.bad { color: var(--bad); } #status-text.busy { color: #9a7400; }
 
+/* phase band: one connected chevron flow, light theme only */
+#phasebar { flex: none; display: flex; align-items: center; gap: 14px; background: #fff; border-bottom: 1px solid var(--line); padding: 9px 16px; }
+#phasebar:empty { display: none; }
+.phase-of { flex: none; line-height: 1.2; }
+.phase-of small { display: block; font-size: 10px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.phase-of b { font-size: 14px; color: var(--brand-dark); white-space: nowrap; }
+.flow { flex: 1; display: flex; min-width: 0; }
+.chev { --tip: 11px; --p: 0%; --fill: var(--brand-line); flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 7px; height: 32px; margin-left: -8px; padding: 0 calc(var(--tip) + 4px) 0 calc(var(--tip) + 6px); font-size: 12px; background: linear-gradient(90deg, var(--fill) var(--p), var(--surface-2) var(--p)); clip-path: polygon(0 0, calc(100% - var(--tip)) 0, 100% 50%, calc(100% - var(--tip)) 100%, 0 100%, var(--tip) 50%); }
+.chev.first { margin-left: 0; padding-left: 10px; clip-path: polygon(0 0, calc(100% - var(--tip)) 0, 100% 50%, calc(100% - var(--tip)) 100%, 0 100%); }
+.chev.done, .chev.started { --fill: var(--phase-done); }
+.chev.current { --fill: var(--phase-current); }
+.chev.todo, .chev.next { color: var(--muted); }
+.chev .cn { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chev.current .cn { color: var(--brand-dark); }
+.chev.done .cn, .chev.started .cn { color: var(--phase-done-ink); }
+.chev .cp { margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.chev .cp b { font-weight: 700; }
+.chev .num { flex: none; width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 700; background: #fff; color: var(--muted); }
+.chev.current .num { background: var(--brand); color: #fff; }
+.chev.done .num, .chev.started .num { background: var(--ok); color: #fff; }
+.chev.next .num { border: 1px dashed var(--brand); color: var(--brand-dark); }
+.banner .cmd { font-family: var(--mono); font-size: 12px; }
+
 #banners { flex: none; z-index: 19; }
 .banner { padding: 5px 16px; font-size: 12.5px; border-bottom: 1px solid var(--line); background: var(--warn-soft); color: var(--warn); }
 .banner.bad { background: var(--bad-soft); color: var(--bad); }
@@ -82,11 +106,13 @@ input:focus, textarea:focus { outline: none; border-color: var(--brand) !importa
 .banner.good { background: var(--ok-soft); color: var(--ok); }
 .banner .cmd { background: rgba(0, 0, 0, .06); border-radius: 4px; padding: 1px 6px; cursor: pointer; }
 .banner .cmd.copied { background: var(--ok); color: #fff; }
+.banner .cmd-copy { font: inherit; font-size: 11px; padding: 1px 8px; border: 1px solid currentColor; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
+.banner .cmd-copy:hover { background: rgba(0, 0, 0, .06); }
 
 /* layout */
 /* Full-width app shell: the document pane takes every remaining pixel and resizes with the window; the panel keeps a fixed width pinned to the right edge. Both scroll independently. */
 /* Below --shell-min the shell stops shrinking: the document keeps its minimum width and the page clips, with a horizontal scrollbar to reach the panel. */
-#header, #banners, #layout { min-width: var(--shell-min); }
+#header, #phasebar, #banners, #layout { min-width: var(--shell-min); }
 #layout { flex: 1; min-height: 0; display: flex; gap: 16px; padding: 0 16px; width: 100%; overflow: hidden; }
 .doc { flex: 1 1 0; width: 0; min-width: var(--main-min); min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 16px 0; }
 .doc-title { font-size: 18px; margin: 0 0 12px; color: var(--ink); letter-spacing: -.01em; }

@@ -143,6 +143,15 @@ test('the PRD and the spec run as two sessions that share nothing', { skip }, as
   assert.ok(!chatB.includes('PRD done.'), 'nor the other run\'s reply');
 });
 
+/** `phases` is scalars only: nothing that would let the sibling's content reach the page. */
+function assertPhasesShape(ph) {
+  assert.deepEqual(Object.keys(ph).sort(), ['current', 'next', 'phases']);
+  assert.equal(ph.phases.length, 3);
+  for (const p of ph.phases) assert.deepEqual(Object.keys(p).sort(), ['n', 'name', 'note', 'percent', 'state']);
+  const flat = JSON.stringify(ph);
+  assert.ok(!/"(blocks|model|text|id|children|hash)"/.test(flat), 'no block, model, text or id keys');
+}
+
 test('the sibling is a read-only path for the agent, never content for the page', { skip }, async t => {
   const root = hostRepo();
   const { url } = await serve(root, SPEC, t);
@@ -156,6 +165,10 @@ test('the sibling is a read-only path for the agent, never content for the page'
   assert.equal(body.reference.pathRel, PRD);
   assert.equal(body.reference.exists, true);
   assert.ok(!body.reference.model && !body.reference.blocks && !body.reference.title && !body.reference.text);
+
+  // The phases summarise both documents as scalars: no block, model, text or id.
+  assertPhasesShape(body.phases);
+  assert.ok(!body.phases.model && !body.phases.blocks && !body.phases.text);
 
   // The agent gets an absolute path it can actually open, flagged read-only.
   await j(url + 'api/batch', { notes: [{ id: 'AC-2', text: 'check this against the PRD' }] });
@@ -266,3 +279,22 @@ test('status reports the mode and the reference document', { skip }, async t => 
   }
 });
 
+
+test('writing the sibling emits a phases event on a spec session, and never writes it', { skip }, async t => {
+  const root = hostRepo();
+  const { url, sse } = await serve(root, SPEC, t);
+  t.after(() => { try { fs.rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ } });
+  const prdFile = path.join(root, PRD);
+  const before = fs.readFileSync(prdFile, 'utf8');
+
+  const { body } = await j(url + 'api/session');
+  assert.equal(body.phases.current, 1);
+  assert.equal(body.phases.next, 'sw-design-requirements specs/0099-mini.md');
+
+  fs.writeFileSync(prdFile, before.replace('| **Status** | Draft |', '| **Status** | Ready for specification |'));
+  const ev = await sse.wait(e => e.event === 'phases');
+  assertPhasesShape(ev.data.phases);
+  assert.equal(ev.data.doc, 'spec');
+  assert.equal(ev.data.phases.current, 2);
+  assert.equal(ev.data.phases.next, 'sw-design-solution specs/0099-mini-spec.md --editor');
+});

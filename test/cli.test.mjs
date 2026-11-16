@@ -378,6 +378,125 @@ test('the packed file list stays inside the files allow-list', async () => {
   assert.ok(!files.some(f => f.startsWith('test/')), 'tests must never ship');
 });
 
+function overviewRepo(files) {
+  const root = hostRepo([]);
+  for (const [name, text] of Object.entries(files)) fs.writeFileSync(path.join(root, 'specs', name), text);
+  return root;
+}
+
+const doc = (status, confidence) => `# Doc\n\n| | |\n| --- | --- |\n| **Status** | ${status} |\n| **Confidence** | ${confidence}% |\n`;
+
+test('overview lists each feature with its phases and the next command', async () => {
+  const root = overviewRepo({
+    '0001-alpha.md': doc('Ready for specification', 95),
+    '0002-beta.md': doc('Draft', 70),
+    '0003-gamma.md': doc('Ready for specification', 95),
+    '0003-gamma-spec.md': doc('Ready for implementation', 92),
+    '0004-delta-spec.md': doc('Draft', 40),
+  });
+  try {
+    const r = await run(['overview'], root);
+    assert.equal(r.code, 0, r.err);
+    assert.equal(field(r.out, 'features'), '4');
+    assert.equal(field(r.out, 'next_step'), 'run sw-design-solution specs/0001-alpha.md --editor');
+    assert.ok(r.out.indexOf('next_step:') < r.out.indexOf('feature '), 'the table comes last');
+    const rows = r.out.split('\n').filter(l => /^000\d /.test(l));
+    assert.equal(rows.length, 4);
+    assert.match(rows[0], /^0001 alpha\s+\[#########-\] 95%\s+n\/a\s+n\/a\s+sw-design-solution specs\/0001-alpha\.md --editor$/);
+    assert.match(rows[1], /^0002 beta\s+\[#######---\] 70%\s+n\/a\s+n\/a\s+sw-design-requirements specs\/0002-beta\.md$/);
+    assert.match(rows[2], /^0003 gamma\s+\[#########-\] 95%\s+\[#########-\] 92%\s+next\s+sw-implement-feature specs\/0003-gamma-spec\.md$/);
+    assert.match(rows[3], /^0004 delta\s+n\/a\s+n\/a\s+n\/a\s+-$/);
+    assert.ok(!r.out.includes('\\'), 'paths use forward slashes');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('overview --json prints structured data after the key lines', async () => {
+  const root = overviewRepo({ '0001-alpha.md': doc('Draft', 30) });
+  try {
+    const r = await run(['overview', '--json'], root);
+    assert.equal(r.code, 0, r.err);
+    assert.equal(field(r.out, 'features'), '1');
+    const data = JSON.parse(r.out.slice(r.out.indexOf('{')));
+    assert.equal(data.features.length, 1);
+    const f = data.features[0];
+    assert.equal(f.feature, '0001 alpha');
+    assert.equal(f.current, 1);
+    assert.equal(f.next, 'sw-design-requirements specs/0001-alpha.md');
+    assert.equal(f.phases[0].percent, 30);
+    assert.equal(f.unreadable, false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('overview on an empty specs folder exits 0 with a next_step', async () => {
+  const root = overviewRepo({});
+  try {
+    const r = await run(['overview'], root);
+    assert.equal(r.code, 0, r.err);
+    assert.equal(field(r.out, 'features'), '0');
+    assert.match(r.out, /^next_step: .*nothing is pending/m);
+    const j = await run(['overview', '--json'], root);
+    assert.equal(j.code, 0, j.err);
+    assert.deepEqual(JSON.parse(j.out.slice(j.out.indexOf('{'))).features, []);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('overview marks an unreadable document and carries on', async () => {
+  const root = overviewRepo({ '0002-ok.md': doc('Draft', 50) });
+  // A directory with a feature file name cannot be read as a document.
+  fs.mkdirSync(path.join(root, 'specs', '0001-broken.md'));
+  fs.writeFileSync(path.join(root, 'specs', '0003-garbage.md'), Buffer.from([0, 255, 254, 1, 2, 3]));
+  try {
+    const r = await run(['overview'], root);
+    assert.equal(r.code, 0, r.err);
+    assert.equal(field(r.out, 'features'), '3');
+    assert.match(r.out, /^0001 broken\s+unreadable/m);
+    assert.match(r.out, /^0002 ok\s+\[#####-----\] 50%/m);
+    assert.match(field(r.out, 'next_step'), /sw-design-requirements specs\/0002-ok\.md/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('overview ignores ADR and verification files', async () => {
+  const root = overviewRepo({
+    '0001-alpha.md': doc('Draft', 10),
+    '0001-adr-001-choice.md': doc('Draft', 10),
+    '0001-alpha-verification.md': '# Verification\n',
+    'notes.md': '# Notes\n',
+  });
+  try {
+    const r = await run(['overview', '--json'], root);
+    assert.equal(r.code, 0, r.err);
+    const data = JSON.parse(r.out.slice(r.out.indexOf('{')));
+    assert.deepEqual(data.features.map(f => f.feature), ['0001 alpha']);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('overview honours --root and rejects an unknown flag', async () => {
+  const root = overviewRepo({ '0001-alpha.md': doc('Draft', 10) });
+  try {
+    const r = await run(['overview', '--root', root], os.tmpdir());
+    assert.equal(r.code, 0, r.err);
+    assert.equal(field(r.out, 'features'), '1');
+    const bad = await run(['overview', '--bogus'], root);
+    assert.equal(bad.code, 2);
+    assert.match(bad.err, /unknown flag --bogus/);
+    assert.match(bad.err, /usage: sw-specs-editor overview/);
+    const help = await run(['--help'], root);
+    assert.match(help.out, /overview/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('every command works through the installed .bin symlink', async t => {
   const tmp = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'specs-editor-pack-'));
   try {
@@ -414,6 +533,7 @@ test('every command works through the installed .bin symlink', async t => {
       { args: ['batch', '--kind', 'bogus', '--doc', DOC], code: 2, expect: /unknown batch kind/ },
       { args: ['diagram'], code: 2, expect: /usage: sw-specs-editor diagram/ },
       { args: ['migrate', '--doc', 'specs/0099-mini-spec.md'], code: 0, expect: /^spec: converted 2 question\(s\)$/m },
+      { args: ['overview'], code: 0, expect: /^features: 1$/m },
       { args: ['install-skill', '--print'], code: 0, expect: /name: sw-specs-editor/ },
       { args: ['uninstall-skill'], code: 0, expect: /^next_step: nothing to remove/m },
       { args: ['bogus'], code: 2, expect: /unknown command bogus/ },

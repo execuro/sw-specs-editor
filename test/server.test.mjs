@@ -27,6 +27,15 @@ async function boot(t, overrides = {}) {
   return { root, session, url, sse, read: d => fs.readFileSync(path.join(root, 'specs', d), 'utf8') };
 }
 
+/** `phases` is scalars only: nothing that would let the sibling's content reach the page. */
+function assertPhasesShape(ph) {
+  assert.deepEqual(Object.keys(ph).sort(), ['current', 'next', 'phases']);
+  assert.equal(ph.phases.length, 3);
+  for (const p of ph.phases) assert.deepEqual(Object.keys(p).sort(), ['n', 'name', 'note', 'percent', 'state']);
+  const flat = JSON.stringify(ph);
+  assert.ok(!/"(blocks|model|text|id|children|hash)"/.test(flat), 'no block, model, text or id keys');
+}
+
 test('the page, its assets and files under specs/ are served, and nothing else is', { skip }, async t => {
   const { root, url } = await boot(t);
 
@@ -69,6 +78,12 @@ test('api/session carries one editable document, and the sibling only as referen
   assert.equal(body.reference.pathRel, 'specs/0099-mini-spec.md');
   assert.equal(body.reference.exists, true);
   assert.ok(!body.reference.model && !body.reference.blocks && !body.reference.title);
+
+  // The fixture PRD is a draft at 72%: phase 1 is current, and the only command is its own.
+  assertPhasesShape(body.phases);
+  assert.equal(body.phases.current, 1);
+  assert.equal(body.phases.phases[0].percent, 72);
+  assert.equal(body.phases.next, 'sw-design-requirements specs/0099-mini.md');
 
   assert.equal(body.session.slug, '0099-mini');
   assert.equal(body.session.sessionSlug, '0099-mini-prd');
@@ -432,4 +447,26 @@ test('only the newest session banner survives; older boundaries collapse to one 
   assert.deepEqual(out.map(e => e.text ?? e.md), ['one', 'previous session', 'two', 'session resumed on http://127.0.0.1:3/']);
   assert.deepEqual(collapseSessions(log.slice(-1)), log.slice(-1));
   assert.equal(collapseSessions([{ type: 'system', text: 'file watching resumed' }])[0].text, 'file watching resumed');
+});
+
+test('writing the sibling emits a phases event, and the doc event carries phases', { skip }, async t => {
+  const { root, url, sse } = await boot(t);
+  const specFile = path.join(root, 'specs', '0099-mini-spec.md');
+
+  fs.writeFileSync(specFile, fs.readFileSync(specFile, 'utf8').replace('| **Status** | Draft |', '| **Status** | In progress |\n| **Confidence** | 60% |'));
+  const ev = await sse.wait(e => e.event === 'phases');
+  assertPhasesShape(ev.data.phases);
+  assert.equal(ev.data.doc, 'prd');
+  assert.equal(ev.data.phases.phases[1].percent, 60);
+
+  const doc = await sse.wait(e => e.event === 'doc', 600).catch(() => null);
+  assert.equal(doc, null, 'the sibling never reloads the primary document');
+
+  fs.appendFileSync(path.join(root, 'specs', '0099-mini.md'), '\nAn extra line.\n');
+  const d = await sse.wait(e => e.event === 'doc');
+  assertPhasesShape(d.data.phases);
+
+  // The sibling is only read: the write above is the test's own.
+  const { body } = await j(url + 'api/session');
+  assertPhasesShape(body.phases);
 });
