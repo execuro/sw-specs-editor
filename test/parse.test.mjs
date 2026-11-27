@@ -151,3 +151,11 @@ test('docTypeFromPath / siblingPath / slugFromPath round-trip both ways', () => 
   // parse() infers the type when the caller does not name it.
   assert.equal(parse(specText, { path: SPEC_PATH }).doc, 'spec');
 });
+
+test('a spec confidence is the same number whether written as NN% or N/5', () => {
+  const meta = cell => parse(`# Spec\n\n| | |\n| --- | --- |\n| **Status** | In progress |\n| **Confidence** | ${cell} |\n`, { path: SPEC_PATH, doc: 'spec' }).meta.confidence;
+  assert.equal(meta('60%'), 60);
+  assert.equal(meta('3/5'), 60, 'the console reports N/5; the page must not show "no confidence" for it');
+  assert.equal(meta('60% (3/5)'), 60, 'the percentage wins when both are written');
+  assert.equal(meta('_TBD_'), null);
+});

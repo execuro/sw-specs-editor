@@ -291,7 +291,8 @@ test('writing the sibling emits a phases event on a spec session, and never writ
   assert.equal(body.phases.current, 1);
   assert.equal(body.phases.next, 'sw-design-requirements specs/0099-mini.md');
 
-  fs.writeFileSync(prdFile, before.replace('| **Status** | Draft |', '| **Status** | Ready for specification |'));
+  // Ready means no open §11 question too, so the fixture's questions go.
+  fs.writeFileSync(prdFile, before.replace('| **Status** | Draft |', '| **Status** | Ready for specification |').replace(/\n## 11\.[\s\S]*$/, '\n'));
   const ev = await sse.wait(e => e.event === 'phases');
   assertPhasesShape(ev.data.phases);
   assert.equal(ev.data.doc, 'spec');
