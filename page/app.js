@@ -661,12 +661,24 @@
    * documents' histories. The trigger is the status the design skill wrote - the
    * page must not re-derive the rule behind it, and `^ready for specification`
    * keeps the spec's own "Ready for implementation" from lighting this.
+   *
+   * The command is phases().next, the same string `status` and `overview` print:
+   * the PRD path while the spec does not exist yet (sw-design-solution drafts it
+   * from the PRD), the spec path once it does. Never the `-spec.md` path of a
+   * file that is not there.
    */
   function readyBanner() {
     if (S.doc !== 'prd' || !S.reference || !/^ready for specification/i.test(S.model?.meta?.status || '')) return null;
+    // Same verdict as the phase band: open questions keep the PRD out of "done".
+    const own = ownPhase();
+    if (own ? own.state !== 'done' : (S.model?.meta?.openQuestions || 0) > 0) return null;
+    const next = S.phases?.next;
+    const cmd = typeof next === 'string' && next.startsWith('sw-design-solution ')
+      ? next
+      : `sw-design-solution ${S.reference.exists ? S.reference.pathRel : S.path} --editor`;
     return el('div', { class: 'banner good' },
       'Ready for Technical Specification. The tech spec is a separate session - run ',
-      copyableCommand(`sw-design-solution ${S.reference.pathRel} --editor`),
+      copyableCommand(cmd),
       ' in your agent. This PRD session stays open.');
   }
 

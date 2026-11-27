@@ -52,6 +52,25 @@ test('phases: the status string decides, not the percentage', () => {
   assert.equal(r.phases[0].percent, 99);
 });
 
+const Q = (section) => `\n## ${section}\n\n**Q-1** Which calendar applies?\n\n- [ ] A: Shop calendar (recommended)\n- [ ] B: Country calendar\n`;
+
+test('phases: a ready PRD with an open question is not done, and the page and status say why', () => {
+  const m = parse(`# PRD\n\n| | |\n| --- | --- |\n| **Status** | ${READY_PRD} |\n| **Confidence** | 93% |\n` + Q('11. Open Questions'), { path: PRD, doc: 'prd' });
+  assert.equal(m.meta.openQuestions, 1);
+  const r = phases({ prdModel: m });
+  assert.equal(states(r), 'current,todo,todo');
+  assert.equal(r.next, `sw-design-requirements ${PRD}`);
+  assert.equal(r.phases[0].note, '1 open question');
+});
+
+test('phases: a ready spec with an open question stays in phase 2', () => {
+  const m = parse(`# Spec\n\n| | |\n| --- | --- |\n| **Status** | ${READY_SPEC} |\n| **Confidence** | 100% |\n` + Q('6. Open Questions'), { path: SPEC, doc: 'spec' });
+  const r = phases({ prdModel: prd(READY_PRD, 93), specModel: m });
+  assert.equal(states(r), 'done,current,todo');
+  assert.equal(r.next, `sw-design-solution ${SPEC} --editor`);
+  assert.equal(r.phases[1].note, '1 open question');
+});
+
 test('phases: a Windows-style model path still yields forward slashes', () => {
   const m = parse('# P\n\n| | |\n| --- | --- |\n| **Status** | Ready for specification |\n', { path: 'specs\\0099-mini.md', doc: 'prd' });
   assert.equal(phases({ prdModel: m }).next, `sw-design-solution ${PRD} --editor`);
@@ -68,7 +87,12 @@ test('status prints the phase line from the files with no server running', async
   const s = await run(['status', '--doc', SPEC], root);
   assert.equal(field(s.out, 'phase'), '1 of 3 Design requirements 72%');
 
-  fs.writeFileSync(`${root}/${PRD}`, fs.readFileSync(`${root}/${PRD}`, 'utf8').replace('| **Status** | Draft |', '| **Status** | Ready for specification |'));
+  const readyText = fs.readFileSync(`${root}/${PRD}`, 'utf8').replace('| **Status** | Draft |', '| **Status** | Ready for specification |');
+  fs.writeFileSync(`${root}/${PRD}`, readyText);
+  const stillOpen = await run(['status', '--doc', PRD], root);
+  assert.equal(field(stillOpen.out, 'phase'), '1 of 3 Design requirements 72%', 'the fixture still has open §11 questions, so it is not done');
+
+  fs.writeFileSync(`${root}/${PRD}`, readyText.replace(/\n## 11\.[\s\S]*$/, '\n'));
   const ready = await run(['status', '--doc', PRD], root);
   assert.equal(field(ready.out, 'phase'), '2 of 3 Design solution current');
 });
