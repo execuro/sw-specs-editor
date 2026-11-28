@@ -73,7 +73,9 @@ export const field = (out, key) => (out.match(new RegExp(`^${key}: (.*)$`, 'm'))
 
 /** A throwaway host repository carrying the fixtures under `specs/`. */
 export function hostRepo(files = ['0099-mini.md', '0099-mini-spec.md', '0099-mini.architecture.graph.json']) {
-  const root = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'specs-editor-'));
+  // Real path: on macOS the temp dir is /var/..., a symlink to /private/var/...,
+  // and the server reports the resolved root, so the two must compare equal.
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), 'specs-editor-')));
   fs.mkdirSync(path.join(root, 'specs'), { recursive: true });
   for (const f of files) fs.copyFileSync(path.join(FIXTURES, f), path.join(root, 'specs', f));
   return root;
