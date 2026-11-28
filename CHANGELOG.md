@@ -30,6 +30,15 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   ships with the agentic harness, a lean agent that starts from a smaller
   context), otherwise to a general-purpose sub-agent.
 
+### Fixed
+
+- **The page no longer says "agent not connected" while a batch is being worked on.**
+  During a run the session loop waits on its sub-agent and cannot poll, so after
+  `--agent-timeout` (120 s) without a progress line the agent was reported gone and
+  Send warned that notes would only be queued. A run in flight now keeps the agent
+  present up to the quiet-run threshold (15 min), and Send no longer warns while a
+  run is active: the notes queue behind it and go out next, as they always did.
+
 ## [0.1.3] - 2026-09-21
 
 ### Added

@@ -378,6 +378,32 @@ test('losing the heartbeat closes the session; agent silence only warns', { skip
   assert.equal(fs.existsSync(lockFile), false, 'shutdown removes the lock so no command believes a dead server');
 });
 
+test('an agent busy on a run stays connected past --agent-timeout', { skip }, async t => {
+  // While a batch runs, the session loop waits on its sub-agent and cannot poll;
+  // only progress lines arrive, minutes apart. That is a busy agent, not a gone one.
+  const { session } = await boot(t, { agentTimeout: 1 });
+  await j(session.url + 'api/batch', { notes: [{ id: 'FR-1', text: 'note' }] });
+  await j(session.url + 'api/next?wait=1');
+  assert.ok(session.run, 'the batch is in flight');
+
+  session.lastPoll = Date.now() - 5 * 60_000;
+  session.tick();
+  assert.equal(session.agentPresent, true, 'five quiet minutes into a run is still a connected agent');
+  assert.equal(session.info().agent.present, true);
+
+  session.lastPoll = Date.now() - 16 * 60_000;
+  session.tick();
+  assert.equal(session.agentPresent, false, 'past the quiet-run threshold the agent may really be gone');
+  assert.equal(session.run.silent, true);
+
+  // With no run, --agent-timeout alone decides, as before.
+  session.abortRun('test');
+  session.polled();
+  session.lastPoll = Date.now() - 5_000;
+  session.tick();
+  assert.equal(session.agentPresent, false, 'an idle loop that stopped polling is disconnected');
+});
+
 test('malformed requests are refused rather than half-applied', { skip }, async t => {
   const { url, session } = await boot(t);
 

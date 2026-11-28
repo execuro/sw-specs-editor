@@ -162,7 +162,8 @@
   async function sendBatch(chatText) {
     const body = { notes: S.notes, chat: chatText || '', remaining: [] };
     if (!S.notes.length && !(chatText || '').trim()) return;
-    if (!S.agent.present) {
+    // A run in flight means the agent is busy, not gone: the batch simply queues behind it.
+    if (!S.agent.present && !S.run) {
       if (!confirm('The agent is not connected (no session loop polling). The batch will wait in the queue until the skill is (re)started. Send anyway?')) return;
     }
     try {
