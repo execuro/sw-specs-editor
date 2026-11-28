@@ -163,8 +163,11 @@
     const body = { notes: S.notes, chat: chatText || '', remaining: [] };
     if (!S.notes.length && !(chatText || '').trim()) return;
     // A run in flight means the agent is busy, not gone: the batch simply queues behind it.
-    if (!S.agent.present && !S.run) {
-      if (!confirm('The agent is not connected (no session loop polling). The batch will wait in the queue until the skill is (re)started. Send anyway?')) return;
+    if (!S.agent.present) {
+      const why = S.agent.state === 'ended' ? 'The agent session has ended.'
+        : S.agent.state === 'stopped' ? 'The agent session is open but its loop has stopped.'
+        : 'The agent is not connected (no session loop polling).';
+      if (!confirm(`${why} The batch will wait in the queue until the skill is (re)started. Send anyway?`)) return;
     }
     try {
       const r = await api('/api/batch', body);
@@ -729,11 +732,16 @@
     // Only while no run is open: during a run the header already says "agent working",
     // and a disconnect banner next to it would contradict it. A run that has genuinely
     // lost its agent is recoverable through the Abort control below instead.
-    if (!S.closed && !S.serverGone && !S.run && !S.agent.present && (S.agent.everPolled || uptimeSec() > (S.session?.agent?.timeout || 120))) host.append(el('div', { class: 'banner' }, 'Agent disconnected - re-run the skill on this document to resume. The page keeps working; batches wait in the queue.'));
+    const live = !S.closed && !S.serverGone;
+    if (live && S.agent.state === 'ended') host.append(el('div', { class: 'banner bad' },
+      'The agent session ended unexpectedly - its process is gone. Re-run the skill on this document to resume; the page keeps working and batches wait in the queue. ',
+      S.run ? el('button', { class: 'btn sm', title: 'End this run so the document unlocks and your queued changes are applied; edits already written are kept', onclick: abortRun }, 'Abort run') : null));
+    else if (live && !S.run && S.agent.state === 'stopped') host.append(el('div', { class: 'banner' }, 'The agent session is still open but its loop has stopped (interrupted, or waiting on a prompt in the terminal). Resume it there, or re-run the skill on this document. Batches wait in the queue.'));
+    else if (live && !S.run && !S.agent.present && (S.agent.everPolled || uptimeSec() > (S.session?.agent?.timeout || 120))) host.append(el('div', { class: 'banner' }, 'Agent disconnected - re-run the skill on this document to resume. The page keeps working; batches wait in the queue.'));
     // Only once the server says the run has gone quiet (RUN_SILENCE, 15 min). A normal run
     // takes minutes and reports nothing between steps, so a banner tied to the 2-minute
     // presence dot would fire on every healthy run.
-    if (!S.closed && !S.serverGone && S.run?.silent) host.append(el('div', { class: 'banner' },
+    if (live && S.run?.silent && S.agent.state !== 'ended') host.append(el('div', { class: 'banner' },
       `No progress from the agent for ${Math.round((S.session?.runSilence || 900) / 60)} min. It may still be working on a long step - the editor waits as long as it takes. Abort only if you know its session was closed or interrupted. `,
       el('button', { class: 'btn sm', title: 'End this run so the document unlocks and your queued changes are applied; edits already written are kept', onclick: abortRun }, 'Abort run')));
     if (Object.values(S.diagramState).includes('fallback')) host.append(el('div', { class: 'banner' }, 'Offline - diagram shown as SVG.'));
@@ -741,13 +749,16 @@
     // Session dot = is there an agent session loop polling this server right now?
     //   green: agent connected and idle · yellow (pulsing): agent working on a batch · red: no agent polling, server gone or session closed
     const dot = $('#status-dot'), txt = $('#status-text');
-    const state = S.closed || S.serverGone ? 'bad' : S.run ? 'busy' : S.agent.present ? 'ok' : 'bad';
+    const ended = S.agent.state === 'ended';
+    const state = S.closed || S.serverGone || ended ? 'bad' : S.run ? 'busy' : S.agent.present ? 'ok' : 'bad';
     dot.className = 'dot ' + state;
     txt.className = 'muted ' + state;
     txt.textContent = S.closed ? 'session closed' : S.serverGone ? 'server unreachable'
+      : ended ? 'agent session ended'
       : S.run ? 'agent working' + (S.queue.length ? ` · ${S.queue.length} waiting` : '')
-      : S.agent.present ? 'agent connected' : 'agent not connected';
+      : S.agent.present ? 'agent connected' : S.agent.state === 'stopped' ? 'agent loop stopped' : 'agent not connected';
     dot.title = txt.title = S.closed ? 'The session has ended.' : S.serverGone ? 'The editor server does not answer.'
+      : ended ? 'The agent process is gone. Re-run the skill on this document to resume.'
       : S.run ? 'The agent session is processing a batch.'
       : S.agent.present ? 'The skill session loop is polling this server; notes you send are processed right away.'
       : 'No skill session loop is polling this server. Notes you send wait in the queue - re-run sw-specs-editor (or the design skill with --editor) on this document to resume.';
@@ -850,7 +861,7 @@
       S.run = r.active ? { id: r.active, silent: Boolean(r.silent) } : null;
       renderBanners(); renderDoc(); renderChat();
     });
-    es.addEventListener('agent', (ev) => { const a = JSON.parse(ev.data); S.agent.present = a.present; S.agent.everPolled = a.everPolled || S.agent.everPolled; renderBanners(); });
+    es.addEventListener('agent', (ev) => { const a = JSON.parse(ev.data); S.agent.present = a.present; if (a.state) S.agent.state = a.state; S.agent.everPolled = a.everPolled || S.agent.everPolled; renderBanners(); });
     es.addEventListener('queued', (ev) => { S.queuedWrites = JSON.parse(ev.data).count; renderBanners(); });
     es.addEventListener('notes', (ev) => { const n = JSON.parse(ev.data); if (n.tab && n.tab !== S.tab) { S.notes = n.notes || []; rebindNotes(); renderQueued(); markNoted(); } });
     es.addEventListener('diagram', (ev) => { const d = JSON.parse(ev.data); const h = S.diagrams.get(d.id); if (h?.handle) h.handle.reload(); });
@@ -873,7 +884,7 @@
   function heartbeat() {
     if (S.closed) return;
     fetch('/api/heartbeat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tab: S.tab }) })
-      .then(r => r.json()).then(j => { if (S.serverGone) { S.serverGone = false; renderBanners(); } if (j.agent && j.agent.present !== S.agent.present) { S.agent.present = j.agent.present; renderBanners(); } })
+      .then(r => r.json()).then(j => { if (S.serverGone) { S.serverGone = false; renderBanners(); } if (j.agent && (j.agent.present !== S.agent.present || (j.agent.state && j.agent.state !== S.agent.state))) { S.agent.present = j.agent.present; if (j.agent.state) S.agent.state = j.agent.state; renderBanners(); } })
       .catch(() => { S.serverGone = true; renderBanners(); });
   }
 

@@ -404,6 +404,110 @@ test('an agent busy on a run stays connected past --agent-timeout', { skip }, as
   assert.equal(session.agentPresent, false, 'an idle loop that stopped polling is disconnected');
 });
 
+/** A real process to stand in for the agent's host (Claude Code, Codex, ...). */
+async function fakeHost(t) {
+  const { spawn } = await import('node:child_process');
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  await new Promise(r => child.once('spawn', r));
+  t.after(() => { try { child.kill('SIGKILL'); } catch { /* gone */ } });
+  return child;
+}
+/** Two calls from different invocations under `pid`, the way `poll` and `emit` send them. */
+function twoCalls(session, pid) {
+  session.noteChain(`91001,92001,${pid}`);
+  session.noteChain(`91002,92002,${pid}`);
+}
+
+test('heartbeat: a live agent stays working however long it is silent', { skip }, async t => {
+  const { session } = await boot(t, { agentTimeout: 1 });
+  const host = await fakeHost(t);
+  await j(session.url + 'api/batch', { notes: [{ id: 'FR-1', text: 'note' }] });
+  await j(session.url + 'api/next?wait=1');
+  twoCalls(session, host.pid);
+  assert.equal(session.host.pid, host.pid);
+
+  session.beat();
+  session.lastPoll = Date.now() - 6 * 60_000; // six minutes of thinking, no word
+  session.tick();
+  assert.equal(session.agentState, 'working');
+  assert.equal(session.agentPresent, true);
+  session.lastPoll = Date.now() - 20 * 60_000; // even past the old 15-minute rule
+  session.tick();
+  assert.equal(session.agentState, 'working', 'a live process is a working agent, not a guess on silence');
+});
+
+test('heartbeat: a killed agent is reported within two beats, not minutes', { skip }, async t => {
+  const { session } = await boot(t, { agentTimeout: 120 });
+  const host = await fakeHost(t);
+  await j(session.url + 'api/batch', { notes: [{ id: 'FR-1', text: 'note' }] });
+  await j(session.url + 'api/next?wait=1');
+  twoCalls(session, host.pid);
+  session.beat(); session.polled(); session.tick();
+  assert.equal(session.agentState, 'working');
+
+  host.kill('SIGKILL');
+  await new Promise(r => host.once('exit', r));
+  session.beat(); session.tick();
+  assert.equal(session.agentState, 'working', 'one missed beat is not enough');
+  session.beat(); session.tick();
+  assert.equal(session.agentState, 'ended', 'the second missed beat is');
+  assert.equal(session.agentPresent, false);
+  assert.equal(session.run.silent, true, 'the page is told so it can offer Abort right away');
+  const ended = session.chatHistory().filter(e => e.type === 'system' && /agent session ended unexpectedly/.test(e.text));
+  assert.equal(ended.length, 1);
+  session.tick();
+  assert.equal(session.chatHistory().filter(e => e.type === 'system' && /agent session ended unexpectedly/.test(e.text)).length, 1, 'said once');
+
+  // A new session on the same document picks up its own host and clears the state.
+  const next = await fakeHost(t);
+  twoCalls(session, next.pid);
+  assert.equal(session.host.pid, next.pid);
+  session.abortRun('test'); session.polled(); session.tick();
+  assert.equal(session.agentState, 'connected');
+});
+
+test('heartbeat: a live session whose loop stopped polling is "stopped", not "ended"', { skip }, async t => {
+  const { session } = await boot(t, { agentTimeout: 1 });
+  const host = await fakeHost(t);
+  twoCalls(session, host.pid);
+  session.beat(); session.polled(); session.tick();
+  assert.equal(session.agentState, 'connected');
+  session.lastPoll = Date.now() - 5_000; // Esc in the terminal, or a prompt waiting
+  session.tick();
+  assert.equal(session.agentState, 'stopped');
+  assert.equal(session.agentPresent, false);
+});
+
+test('heartbeat: a live host is never replaced by calls that share a short-lived shell', { skip }, async t => {
+  // Seen in a real session: two CLI calls in one shell command share that shell, and
+  // pairing just those two named the shell as the host; it exited a second later and
+  // the agent was reported dead while it kept working.
+  const { session } = await boot(t);
+  const host = await fakeHost(t);
+  const shell = await fakeHost(t);
+  twoCalls(session, host.pid);
+  session.noteChain(`94001,${shell.pid},${host.pid}`);
+  session.noteChain(`94002,${shell.pid},${host.pid}`);
+  assert.equal(session.host.pid, host.pid, 'the live host stays');
+  shell.kill('SIGKILL');
+  await new Promise(r => shell.once('exit', r));
+  session.beat(); session.polled(); session.tick(); session.tick();
+  assert.notEqual(session.agentState, 'ended');
+});
+
+test('heartbeat: the legs of one poll never pick a host; the header is read on /api/next', { skip }, async t => {
+  const { session } = await boot(t);
+  const host = await fakeHost(t);
+  session.noteChain(`91001,92001,${host.pid}`);
+  session.noteChain(`91001,92001,${host.pid}`);
+  assert.equal(session.host.pid, null, 'same invocation twice: its own shell would look like the host');
+  for (const self of [93001, 93002]) {
+    await fetch(session.url + 'api/next?wait=1', { headers: { 'x-agent-chain': `${self},${self + 1},${host.pid}` } });
+  }
+  assert.equal(session.host.pid, host.pid);
+  assert.equal(session.info().agent.hostPid, host.pid);
+});
+
 test('malformed requests are refused rather than half-applied', { skip }, async t => {
   const { url, session } = await boot(t);
 
